@@ -1,38 +1,47 @@
-extensions [table]
 ;one property can be a location
 ;**change all properties to assets for clarity**
+;**start using the time extension**
 to COST_table.setup
   COST_table.setup_assets
   set average-price total-value / num-assets
   set assets sort-by [[p1 p2] -> table:get p1 "Price" < table:get p2 "Price"] assets
-  set average-ownership-length mean (map [d -> 0 - table:get d "Date of purchase"] assets)
+  set average-ownership-length mean (map [d -> time:difference-between (table:get d "Date of purchase") dt "days"] assets)
 end
 
 to COST_table.setup_assets
   let counter 0
+  ;put the code that generates an asset into a procedure
   while [counter < num-assets] [
     let new-asset table:make ;each property is a table
     let price (random 100 + 1) ;it gets a random starting price
     set total-value total-value + price ;adds the price to the total value
     table:put new-asset "Price" price
     table:put new-asset "Bought-at" (price - (random (price / 2) )) ;in the final model this won't be random
+    table:put new-asset "Date of purchase" (time:plus dt (random (- re-assessment-period * 365)) "day")
     (ifelse 
       asset-types = "ERA" [ 
-      let markdown random-float 0.5
-      table:put new-asset "Asset-type" "ERA"
-      table:put new-asset "AIV assessments" (list (list (price * (1 - markdown)) random -30)) ;maybe change this to a list of all AIV values that changes on the fly, initialize it to a list with 1 entry
-      ;also make this a list of list which includes the time of the assesment for each value, meaning you don't need a separate value for "time of last assessment"
-      table:put new-asset "Severe events" (list)
+        let markdown random-float 0.5
+        table:put new-asset "Asset-type" "ERA"
+        let AIVs ts-create ["Assessment values"]
+        let days-since-purchase time:difference-between table:get new-asset "Date of purchase" dt "day"
+        let time-of-last-assessment (time:plus table:get new-asset "Date of purchase" (random days-since-purchase) "day")
+        set AIVs ts-add-row AIVs (list time-of-last-assessment (price * (1 - markdown)))
+        table:put new-asset "AIV assessments" AIVs ;maybe change this to a list of all AIV values that changes on the fly, initialize it to a list with 1 entry
+                                                                                                ;also make this a list of list which includes the time of the assesment for each value, meaning you don't need a separate value for "time of last assessment"
+        ;table:put new-asset "Severe events" (list)
+        table:put new-asset "Redemption date" (time:plus (table:get new-asset "Date of purchase") 75 "year") ;change to redemption date
     ]
       asset-types = "Income-generating"[
-        
-      
+        table:put new-asset "Asset-type" "Income-generating"
+        table:put new-asset "Income" (list (random 50 + 50))
+        let max-income-factor (random-normal 1.5 0.5)
+        if max-income-factor < 1 [set max-income-factor 1]
+        table:put new-asset "Max-income" ((first table:get new-asset "Income") * max-income-factor)
     ])
     table:put new-asset "In-transaction?" false
-    table:put new-asset "Date of purchase" (random -30) ;each property gets a random length-owned time
+     ;each property gets a random length-owned time
     ;maybe up until here make everything prior its own procedure that reports a table - anything generic
     ;make more of these things reporters
-    table:put new-asset "Cash-in date" (table:get new-asset "Date of purchase" + (365 * 75))
     set assets fput new-asset assets
     set counter counter + 1
   ]
@@ -41,35 +50,34 @@ end
 to COST_table.go
   foreach assets[ a ->
     table:put a "In-transaction?" true
-    try-cash-in a
+    if table:get a "Asset-type" = "ERA" [try-cash-in a]
   ]
   ask turtles [COST_table.transact]
   calculate-average-value
-  if (ticks / 365) mod tax-period = 0 [
+  if (time:difference-between start-date dt "years") mod tax-period = 0 [
     ask turtles [
       pay-taxes
       set cash cash + income
     ]
   ]
-  tick
 end
 
 to try-cash-in [asset] 
-  ifelse first first table:get asset "AIV assessments" >= table:get asset "Price"[
+  ifelse last last table:get asset "AIV assessments" = table:get asset "Price"[
     let owner table:get asset "Owner"
     ask owner [
       set cash (cash + (first first table:get asset "AIV assessments"))
       set personal-assets remove asset personal-assets
-      set tax-bill (tax-bill - (tax-rate * table:get asset "Price"))
+      set tax-bill (tax-bill - (ERA-receipt-tax-rate * table:get asset "Price"))
     ]
     set assets remove asset assets
   ][
-    if ticks = table:get asset "Cash-in date" [
+    if dt = table:get asset "Redemption date" [
       let owner table:get asset "Owner"
       ask owner [
         set cash (cash + (first first table:get asset "AIV assessments"))
         set personal-assets remove asset personal-assets
-        set tax-bill (tax-bill - (tax-rate * table:get asset "Price"))
+        set tax-bill (tax-bill - (ERA-receipt-tax-rate * table:get asset "Price"))
       ]
       set assets remove asset assets
     ]
@@ -78,17 +86,17 @@ end
 
 to-report get-difference [a]
   let price table:get a "Price"
-  let AIV first first (table:get a "AIV assessments")
+  let AIV last last (table:get a "AIV assessments")
   report (price / AIV)
 end
 
 to calculate-average-length-owned 
-  set average-ownership-length (mean (map [a -> ticks - table:get a "Date of purchase"] assets))
+  set average-ownership-length (mean (map [a -> time:difference-between (table:get a "Date-of-purchase") dt "days"] assets))
 end
 
 to COST_table.transact
   let current-turtle self
-  let counter 0
+  ;let counter 0
   let disposable-income cash - tax-bill
   let potential-assets filter [a -> table:get a "Price" < disposable-income and table:get a "In-transaction?" = true and table:get a "Owner" != current-turtle] assets
   let ERA-assets shuffle (filter [a -> table:get a "Asset-type" = "ERA"] potential-assets)
@@ -96,19 +104,19 @@ to COST_table.transact
     let estimate COST_table.assess_value a
     let price table:get a "Price"
     if price < disposable-income and estimate > price[
-      let remaining-time ((table:get a "Cash-in date" - ticks) / 365)
+      let remaining-time (time:difference-between dt (table:get a "Redemption date") "year")
       let remaining-tax-payments (remaining-time / tax-period)
-      let total-cost (table:get a "Price" + (remaining-tax-payments * tax-rate * estimate) + min-net-gain)
+      let total-cost (table:get a "Price" + (remaining-tax-payments * ERA-receipt-tax-rate * estimate) + min-net-gain)
       if estimate > total-cost[
         ask one-of patches [set pcolor yellow]
         set cash (cash - table:get a "Price")
         set personal-assets fput a personal-assets
-        set tax-bill (tax-bill + (tax-rate * estimate))
+        set tax-bill (tax-bill + (ERA-receipt-tax-rate * estimate))
         set disposable-income cash - tax-bill
         ask table:get a "Owner" [
           set cash (cash + table:get a "Price")
           set personal-assets remove a personal-assets
-          set tax-bill (tax-bill - (tax-rate * table:get a "Price"))
+          set tax-bill (tax-bill - (ERA-receipt-tax-rate * table:get a "Price"))
         ]
         table:put a "Owner" current-turtle
         table:put a "Bought-at" (table:get a "Price")
@@ -119,6 +127,14 @@ to COST_table.transact
       ]
     ]
   ]
+  let income-generating-assets shuffle (filter [a -> table:get a "Asset-type" = "Income-generating"] assets)
+  foreach income-generating-assets[a ->
+    let estimated-income COST_table.assess_value a
+    let current-income first table:get a "Income"
+    if estimated-income > current-income [
+      
+    ]
+  ]
   ;represents a list of all the propreties a turtle could theoretically purchase
 ;  while [length potential-assets > 0] [ ;thinking of maybe adding a max-transactions parameter, although I'm not sure if this is necessary
 ;    let ERA-assets filter [a -> table:get a "Asset-type" = "ERA"] potential-assets ;I'm only working with ERAs right now, in the expanded model 
@@ -126,17 +142,17 @@ to COST_table.transact
 ;    let prospective one-of ERA-assets
 ;    let estimate COST_table.assess_value prospective
 ;    if estimate > table:get prospective "Price"[
-;      let remaining-time ((table:get prospective "Cash-in date" - ticks) / 365)
+;      let remaining-time ((table:get prospective "Redemption date" - ticks) / 365)
 ;      let remaining-tax-payments (remaining-time / tax-period)
-;      let total-cost (table:get prospective "Price" + (remaining-tax-payments * tax-rate * estimate) + min-net-gain)
+;      let total-cost (table:get prospective "Price" + (remaining-tax-payments * ERA-receipt-tax-rate * estimate) + min-net-gain)
 ;      if estimate > total-cost [
 ;        set cash (cash - table:get prospective "Price")
 ;        set personal-assets fput prospective personal-assets
-;        set tax-bill (tax-bill + (tax-rate * estimate))
+;        set tax-bill (tax-bill + (ERA-receipt-tax-rate * estimate))
 ;        ask table:get prospective "Owner" [
 ;          set cash (cash + table:get prospective "Price")
 ;          set personal-assets remove prospective personal-assets
-;          set tax-bill (tax-bill - (tax-rate * table:get prospective "Price"))
+;          set tax-bill (tax-bill - (ERA-receipt-tax-rate * table:get prospective "Price"))
 ;        ]
 ;        table:put prospective "Owner" current-turtle
 ;        table:put prospective "Bought-at" (table:get prospective "Price")
@@ -150,22 +166,46 @@ to COST_table.transact
 end
 
 to-report COST_table.assess_value [asset]
-  let difference get-difference asset
-  let estimated-change 0
-;  ifelse length table:get asset "AIV assessments" > 1 [
-;    let average-change (map [[a1 a2] -> (first a2) / (first a1)] table:get asset "AIV assessments")
-;    let recent-change (first item 1 table:get asset "AIV assessments") / (first item 0 table:get asset "AIV assessments")
-;    ifelse average-change > recent-change [
-;      set estimated-change (recent-change * (random-normal 0.95 0.025))
-;    ][
-;      set estimated-change (recent-change * (random-normal 1.05 0.025))
-;    ]
-;  ][
-;    set estimated-change random-normal 1.05 0.025
-;  ]
-;  report (first first table:get asset "AIV assessments" * estimated-change)
-  let diference get-difference asset
-  report (random-normal (first first table:get asset "AIV assessments" * difference) (abs difference - 1))
+  (ifelse
+    table:get asset "Asset-type" = "ERA"[
+      let difference get-difference asset
+      let estimated-change 0
+      ;  ifelse length table:get asset "AIV assessments" > 1 [
+      ;    let average-change (map [[a1 a2] -> (first a2) / (first a1)] table:get asset "AIV assessments")
+      ;    let recent-change (first item 1 table:get asset "AIV assessments") / (first item 0 table:get asset "AIV assessments")
+      ;    ifelse average-change > recent-change [
+      ;      set estimated-change (recent-change * (random-normal 0.95 0.025))
+      ;    ][
+      ;      set estimated-change (recent-change * (random-normal 1.05 0.025))
+      ;    ]
+      ;  ][
+      ;    set estimated-change random-normal 1.05 0.025
+      ;  ]
+      ;  report (first first table:get asset "AIV assessments" * estimated-change)
+      let diference get-difference asset
+      report (random-normal (last last table:get asset "AIV assessments" * difference) (abs difference - 1))
+    ]
+    table:get asset "Asset-type" = "Income-generating" [
+      let current-asset-income first table:get asset "Income"
+      ifelse length table:get asset "Income" > 1[
+        let average-income-change ((last table:get asset "Income") / (first table:get asset "Income"))
+        let recent-income-change ((item 1 table:get asset "Income") / (first table:get asset "Income"))
+        (ifelse
+          average-income-change = recent-income-change[
+            report ((random-normal 1 0.1) * current-asset-income)
+          ]
+          average-income-change > recent-income-change[
+            report ((random-normal 0.95 0.01) * recent-income-change * current-asset-income)
+          ][
+            report ((random-normal 1.05 0.05) * recent-income-change * current-asset-income)
+          ]
+        )
+      ][
+        report ((random-normal 1 0.1) * current-asset-income)
+      ]
+    ]
+  )
+
 end
 
 to calculate-average-value

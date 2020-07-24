@@ -1,4 +1,5 @@
-__includes["COST_table_algorithms.nls"]
+__includes["COST_table_algorithms.nls" "time-series.nls"]
+extensions [table time csv]
 
 globals[
   assets
@@ -6,6 +7,8 @@ globals[
   total-value
   average-price
   average-ownership-length
+  dt
+  start-date
 ]
 
 turtles-own[
@@ -18,6 +21,8 @@ turtles-own[
 
 to setup
   clear-all
+  set dt time:anchor-to-ticks (time:create "2000/01/01") 1 "day"
+  set start-date time:create "2000/01/01"
   set total-value 0 ;total-value is the total value of all of the properties
   set assets (list)
   ask turtles [set tax-bill 0]
@@ -41,15 +46,24 @@ to assign-owners
     let new-owner one-of turtles with [length personal-assets = 0]
     if new-owner = nobody [set new-owner one-of turtles]
     table:put a "Owner" new-owner
+    let asset-type table:get a "Asset-type"
+    let price table:get a "Price"
     ask new-owner [
       set personal-assets fput a personal-assets
-      set tax-bill (tax-bill + (tax-rate * table:get a "Price"))
+      (ifelse
+        asset-type = "ERA" [
+          set tax-bill tax-bill + (price * ERA-receipt-tax-rate)
+      ]
+        asset-type = "Income-generating"[
+          set tax-bill tax-bill + (price * income-generating-asset-tax-rate)
+      ])
     ]
   ]
 end
 
 to go
   COST_table.go
+  tick
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
@@ -146,11 +160,11 @@ SLIDER
 448
 765
 481
-tax-rate
-tax-rate
+ERA-receipt-tax-rate
+ERA-receipt-tax-rate
 0
 0.01
-0.0011
+0.0025
 0.0001
 1
 NIL
@@ -205,7 +219,7 @@ SLIDER
 172
 re-assessment-period
 re-assessment-period
-5
+1
 10
 5.0
 1
@@ -245,6 +259,21 @@ false
 "" ""
 PENS
 "default" 1.0 0 -16777216 true "" "plot mean (map [a -> table:get a \"Price\"] assets)"
+
+SLIDER
+328
+481
+597
+514
+income-generating-asset-tax-rate
+income-generating-asset-tax-rate
+0
+0.5
+0.25
+0.01
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
