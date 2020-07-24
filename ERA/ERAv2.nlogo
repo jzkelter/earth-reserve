@@ -7,10 +7,10 @@ breed [ proj-investors proj-investor ]
 
 patches-own [
   country
-  environment-health
+  ecological-health
   cost-of-proj ;; will be in own currency?, so outsiders will have to convert with ERI
   timeframe-of-proj
-  env-benefit-from-proj
+  true-eco-benefit-from-proj
   proj-counter
   proj-here?
 ]
@@ -22,6 +22,7 @@ proj-investors-own [
   ability
   new-project? ;; if investor got new project in this tick
   completed-projects ;; to factor into ability
+  estimated-aiv-potential-project
 ]
 
 
@@ -41,7 +42,7 @@ to setup
 end
 
 to setup-ops-nodes
-  foreach n-of 3 base-colors [ c ->   ;; 3 is placeholder for number of countries
+  foreach n-of 3 base-colors [ c ->   ;; 3 is placeholder for number of jurisdictions
     ask one-of patches [
       sprout-ops-nodes 1 [
         set color c
@@ -60,9 +61,9 @@ to setup-proj-investors
     setxy random-xcor random-ycor
     set home-country [who] of min-one-of ops-nodes [distance myself]
     set cash round random-normal 10000 1000
-    set ability round random-normal 0.6 0.25
+    set ability round random-normal 0.7 0.25
     if ability > 1 [set ability 1]
-    if ability < 0.01 [set ability 0.01]
+    if ability < 0.11 [set ability 0.11]
     set current-projects (list)
     set new-project? false
   ]
@@ -70,36 +71,38 @@ end
 
 to setup-patches
   ask patches [
-    set environment-health (1 + random 1000)
-    set pcolor ([color] of min-one-of ops-nodes [distance myself] + (sqrt environment-health) / 9)
+    set ecological-health (1 + random 1000)
+    set pcolor ([color] of min-one-of ops-nodes [distance myself] + (sqrt (ecological-health)) / 20)
     set country [who] of min-one-of ops-nodes [distance myself]
     set proj-counter 0
     set timeframe-of-proj (2 + random 18)
     set cost-of-proj (round random-normal 200 45) * timeframe-of-proj
-    set env-benefit-from-proj round sqrt((- ln(environment-health) + round (cost-of-proj)))
+    set true-eco-benefit-from-proj round (random-normal 300 40 * timeframe-of-proj - ln(ecological-health))
     set proj-here? false
   ]
 end
 
+;; patches only have env health (change to topsoil quant and qual), no need for cost of project etc
+;; dim returns for project, function --> given patch's current state, if you were to invest x, that would improve by y in ideal case
+;; instead of true aiv, it's an "ideal" aiv --> mean benefit for x amount of resources, incorporating ability
+;; ability (mean benefit from given resources)
+
+;; climate characteristics of patch (for later)
+;; range of projects instead of one project with fixed benefit
+;; code above go is probably not core ERA code
 
 to go
   ;; environment degradation over time
   if (ticks > 0 and ticks mod 20 = 0) [
-    ask patches with [environment-health > 1][ ;; something that asymptotes, use a function instead of linear
-      set environment-health (environment-health - 1)
-      set pcolor ([color] of one-of ops-nodes with [who = [country] of myself] + (sqrt environment-health) / 9)
-    ]
-    ask patches with [proj-here? = false] [
-      set env-benefit-from-proj round sqrt((- ln(environment-health) + round (cost-of-proj)))
-    ]
+    eco-degradation
   ]
 
   ask proj-investors [
-    update-proj-time
+    update-or-complete-project
     set new-project? false
-    select-proj-location
+    look-for-new-project ;; assuming if found project (assume something is going on), change so more explicit
     if new-project? = true [
-      select-redemption-price
+      select-min-redemption-price ;; maybe change
       choose-ops-node
     ]
   ]
@@ -107,14 +110,23 @@ to go
     review-proposals
   ]
   ask proj-investors [
-    update-proj-info
+    update-project-info
   ]
 
   tick
 end
 
+to eco-degradation
+  ask patches with [ecological-health > 1][ ;; something that asymptotes, use a function instead of linear
+      set ecological-health (ecological-health - 1)
+      set pcolor ([color] of one-of ops-nodes with [who = [country] of myself] + (sqrt (ecological-health)) / 20)
+    ]
+    ask patches with [proj-here? = false] [
+      set true-eco-benefit-from-proj round (random-normal 300 40 * timeframe-of-proj - ln(ecological-health))
+    ]
+end
 
-to select-proj-location
+to look-for-new-project
   if cash >= 100 [
     let potential-project best-deal-near-me ([ability] of self)
     ifelse potential-project != nobody [
@@ -122,7 +134,8 @@ to select-proj-location
       table:put new-project "project-location" potential-project
       table:put new-project "project-cost" [cost-of-proj] of potential-project
       table:put new-project "project-timeframe" [timeframe-of-proj] of potential-project
-      table:put new-project "project-env-benefit" [env-benefit-from-proj] of potential-project
+      table:put new-project "project-true-eco-benefit" [true-eco-benefit-from-proj] of potential-project
+      table:put new-project "project-investor-estimated-aiv" estimated-aiv-potential-project
 
       set current-projects fput new-project current-projects
       move-to table:get new-project "project-location"
@@ -138,11 +151,35 @@ to select-proj-location
 
 end
 
-to select-redemption-price
+to-report best-deal-near-me [proj-investor-ability]
+  let available-projects patches in-radius 7 with [proj-here? = false and cost-of-proj < [cash] of myself and ecological-health < 2000]
+  let estimated-aiv round ((random-normal true-eco-benefit-from-proj true-eco-benefit-from-proj / 4) * (proj-investor-ability)) ;; set scale so no arbitrary multiplicative factors
+  let estimated-cost round (cost-of-proj) ;; set estimated aiv similar scale to estimated cost
+  let potential-project max-one-of available-projects [estimated-aiv - estimated-cost] ;; reports a patch
+
+;  show [estimated-aiv] of potential-project
+;  show [estimated-cost] of potential-project ;; estimated cost (actually doing the project + taxes to pay)
+;  show [estimated-aiv - estimated-cost] of potential-project
+
+  if potential-project != nobody [
+  ifelse [estimated-aiv - estimated-cost] of potential-project > 0.005 * ([cash] of self) [ ;; 0.01 is arbitrary - saying want a min return of 1% of their wealth
+      set estimated-aiv-potential-project [estimated-aiv] of potential-project
+      report potential-project
+  ] [
+    report nobody
+    ]
+  ]
+  report nobody
+end
+
+
+to select-min-redemption-price
   let cost table:get item 0 current-projects "project-cost"
   let time table:get item 0 current-projects "project-timeframe"
-  let redemption-price cost + random 900 + 100 ;; where the COST stuff comes in, same as selecting price there
-  table:put item 0 current-projects "proposed-redemption-price" redemption-price
+  let estimated-aiv table:get item 0 current-projects "project-investor-estimated-aiv"
+  ;; where the COST stuff comes in, same as selecting price there
+  let min-redemption-price cost + (0.1 * cost) ;; min margin same for everyone, say 10%--> plus or percentage?
+  table:put item 0 current-projects "min-redemption-price" min-redemption-price
 end
 
 ;; legal stuff - in some places only certain currencies are allowed
@@ -157,63 +194,52 @@ to choose-ops-node
 end
 
 
-to-report best-deal-near-me [proj-investor-ability]
-  let available-projects patches in-radius 7 with [proj-here? = false and cost-of-proj < [cash] of myself and environment-health < 1000]
-  let benefit (env-benefit-from-proj) * (proj-investor-ability) ;; set scale so no arbitrary multiplicative factors
-  let cost round sqrt(cost-of-proj) ;; set benefit similar scale to cost
-  let potential-project max-one-of available-projects [benefit - cost] ;; reports a patch
-
-  show [benefit] of potential-project
-  show [cost] of potential-project
-  show [benefit - cost] of potential-project
-
-  if potential-project != nobody [
-  ifelse [benefit - cost] of potential-project > 0.01 * ([cash] of self) [ ;; 0.01 is arbitrary - saying want a min return of 1% of their wealth
-    report potential-project
-  ] [
-    report nobody
-    ]
-  ]
-  report nobody
-end
 
 to review-proposals
   let agents-with-new-proposals-for-me proj-investors with [new-project? = true and table:get item 0 current-projects "relevant-ops-node" = myself]
 
   ask agents-with-new-proposals-for-me [
-    let proposed-redemption-price table:get item 0 current-projects "proposed-redemption-price"
+    let min-redemption-price table:get item 0 current-projects "min-redemption-price"
     let cost table:get item 0 current-projects "project-cost"
-    let env-benefit table:get item 0 current-projects "project-env-benefit"
+    let true-eco-benefit table:get item 0 current-projects "project-true-eco-benefit"
     let time table:get item 0 current-projects "project-timeframe"
-    let current-environment-health [environment-health] of table:get item 0 current-projects "project-location"
+    let current-ecological-health [ecological-health] of table:get item 0 current-projects "project-location"
 
-    node-accept-or-reject env-benefit time current-environment-health
+    let node-estimated-aiv round (random-normal true-eco-benefit true-eco-benefit / 4)
+
+    node-accept-or-reject node-estimated-aiv time current-ecological-health
     table:put item 0 current-projects "do-project?" false
 
     if table:get item 0 current-projects "proposal-result" = "accept" [
-      ifelse random 100 < 70 [ ;; node agrees to proposed redemption price -- fine for random now, put in reporter for whether or not the node agrees (can change into non random for later)
-        accept-project proposed-redemption-price
-      ][ ;; else node suggests higher or lower price
-        let node-redemption-price round random-normal (proposed-redemption-price) (proposed-redemption-price / 4)
-        ifelse node-redemption-price >= proposed-redemption-price [ ;; agent automatically accepts if new price is higher
-          accept-project node-redemption-price
-        ][ ;; else if new price is lower, agent accepts/rejects with randomness
-          if node-redemption-price > cost and random 100 < 70 [ ;; if these conditions are fulfilled the agent still accepts (shouldn't be random_
-            accept-project node-redemption-price ;; privately proj investors have minimum price (if less than that then bye)
-          ] ;; no need to write an else condition because the default do-project? is false
-        ]
+      if node-estimated-aiv >= min-redemption-price [
+        accept-project node-estimated-aiv
       ]
     ]
+
+; old code with old rules, keeping for reference
+;    if table:get item 0 current-projects "proposal-result" = "accept" [
+;      ifelse random 100 < 70 [ ;; node agrees to proposed redemption price -- fine for random now, put in reporter for whether or not the node agrees (can change into non random for later)
+;        accept-project proposed-redemption-price
+;      ][ ;; else node suggests higher or lower price
+;        let node-redemption-price round random-normal (proposed-redemption-price) (proposed-redemption-price / 4)
+;        ifelse node-redemption-price >= proposed-redemption-price [ ;; agent automatically accepts if new price is higher
+;          accept-project node-redemption-price
+;        ][ ;; else if new price is lower, agent accepts/rejects with randomness
+;          if node-redemption-price > cost and random 100 < 70 [ ;; if these conditions are fulfilled the agent still accepts (shouldn't be random_
+;            accept-project node-redemption-price ;; privately proj investors have minimum price (if less than that then bye)
+;          ] ;; no need to write an else condition because the default do-project? is false
+;        ]
+;      ]
+;    ]
+
   ]
 end
 
 
-to node-accept-or-reject [env-benefit time current-environment-health]
-  (ifelse current-environment-health <= 10 [
+to node-accept-or-reject [node-estimated-aiv time current-ecological-health]
+  (ifelse current-ecological-health <= 100 [
       table:put item 0 current-projects "proposal-result" "accept"
-    ] env-benefit / time < 1 [
-      table:put item 0 current-projects "proposal-result" "reject"
-    ] random 100 < 5 [
+    ] node-estimated-aiv / time < 150 [
       table:put item 0 current-projects "proposal-result" "reject"
     ][ ;; else
       table:put item 0 current-projects "proposal-result" "accept"
@@ -221,14 +247,14 @@ to node-accept-or-reject [env-benefit time current-environment-health]
   )
 end
 
-to accept-project [redemption-price]
-  table:put item 0 current-projects "final-redemption-price" redemption-price
+to accept-project [node-estimated-aiv]
+  table:put item 0 current-projects "node-estimated-aiv" node-estimated-aiv
   table:put item 0 current-projects "do-project?" true
 end
 
-to update-proj-info
+to update-project-info
     if new-project? = true and table:get item 0 current-projects "do-project?" = false [
-      ;; ask patches to set proj-here false if proposal was not accepted
+      ;; ask patch to set proj-here false if project investor decided to not do project
       ask table:get item 0 current-projects "project-location" [
         set proj-here? false
       ]
@@ -242,7 +268,8 @@ to update-proj-info
     ]
 end
 
-to update-proj-time
+
+to update-or-complete-project
   foreach n-values length current-projects [i -> i] [ n ->
     let time-now table:get item n current-projects "project-time-elapsed"
     set time-now (time-now + 1)
@@ -265,33 +292,41 @@ end
 
 to update-stats [project]
   ;; update proj-investor cash
-  let old-redemption-price table:get item project current-projects "final-redemption-price"
+  let old-redemption-price table:get item project current-projects "node-estimated-aiv"
   ifelse random 100 < 85 [
     set cash (cash + old-redemption-price)
-  ][
+  ][ ;; with some probability it's a different price because the node reassesses the aiv again
     let new-redemption-price round random-normal old-redemption-price old-redemption-price / 6
+    set cash (cash + new-redemption-price)
   ]
   ;; update ability
   if ability < 1 [
     set ability (ability + 0.01)]
   ;; update project status
   let finished-project-location table:get item project current-projects "project-location"
-  let finished-project-env-benefit table:get item project current-projects "project-env-benefit"
+  let finished-project-true-eco-benefit table:get item project current-projects "project-true-eco-benefit"
   ask finished-project-location [
-    set environment-health (environment-health + finished-project-env-benefit)
+    set ecological-health (ecological-health + finished-project-true-eco-benefit)
     set proj-counter (proj-counter + 1)
     set proj-here? false
+    set-new-project
   ]
+
 end
 
+to set-new-project ;; not core
+  set cost-of-proj (round random-normal 200 45) * timeframe-of-proj
+  set true-eco-benefit-from-proj round (random-normal 300 40 * timeframe-of-proj - ln(ecological-health))
+  set pcolor ([color] of one-of ops-nodes with [who = [country] of myself] + (sqrt (ecological-health)) / 20)
+end
 
 ;; risk assessment (cost of project would be distribution, some projects will have more risk)
 ;; point assessment ok for first
 @#$#@#$#@
 GRAPHICS-WINDOW
-210
+329
 10
-647
+766
 448
 -1
 -1
@@ -375,7 +410,7 @@ num-proj-investors
 num-proj-investors
 0
 50
-20.0
+30.0
 1
 1
 NIL
@@ -384,7 +419,7 @@ HORIZONTAL
 PLOT
 4
 199
-204
+256
 328
 num projects completed by an investor
 NIL
@@ -402,9 +437,9 @@ PENS
 PLOT
 4
 335
-204
+257
 485
-num projects on a patch
+num projects completed on a patch
 NIL
 NIL
 0.0
