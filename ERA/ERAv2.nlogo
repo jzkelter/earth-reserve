@@ -1,3 +1,5 @@
+__includes ["ERAv2core.nls"]
+
 extensions [ table ]
 
 globals [ eri-currencies ]
@@ -92,64 +94,65 @@ end
 ;; code above go is probably not core ERA code
 
 to go
-  ;; environment degradation over time
   if (ticks > 0 and ticks mod 20 = 0) [
-    eco-degradation
+    core.eco-degradation
   ]
 
   ask proj-investors [
-    update-or-complete-project
+    core.update-or-complete-project
+
     set new-project? false
-    look-for-new-project ;; assuming if found project (assume something is going on), change so more explicit
+    core.look-for-new-project
     if new-project? = true [
-      select-min-redemption-price ;; maybe change
-      choose-ops-node
+      core.select-min-redemption-price
+      core.choose-ops-node
     ]
   ]
+
   ask ops-nodes [
-    review-proposals
+    core.review-proposals
   ]
+
   ask proj-investors [
-    update-project-info
+    core.update-project-info
   ]
 
   tick
 end
 
-to eco-degradation
-  ask patches with [ecological-health > 1][ ;; something that asymptotes, use a function instead of linear
-      set ecological-health (ecological-health - 1)
-      set pcolor ([color] of one-of ops-nodes with [who = [country] of myself] + (sqrt (ecological-health)) / 20)
-    ]
-    ask patches with [proj-here? = false] [
-      set true-eco-benefit-from-proj round (random-normal 300 40 * timeframe-of-proj - ln(ecological-health))
-    ]
-end
+;to eco-degradation
+;  ask patches with [ecological-health > 1][ ;; something that asymptotes, use a function instead of linear
+;      set ecological-health (ecological-health - 1)
+;      set pcolor ([color] of one-of ops-nodes with [who = [country] of myself] + (sqrt (ecological-health)) / 20)
+;    ]
+;    ask patches with [proj-here? = false] [
+;      set true-eco-benefit-from-proj round (random-normal 300 40 * timeframe-of-proj - ln(ecological-health))
+;    ]
+;end
 
-to look-for-new-project
-  if cash >= 100 [
-    let potential-project best-deal-near-me ([ability] of self)
-    ifelse potential-project != nobody [
-      let new-project table:make
-      table:put new-project "project-location" potential-project
-      table:put new-project "project-cost" [cost-of-proj] of potential-project
-      table:put new-project "project-timeframe" [timeframe-of-proj] of potential-project
-      table:put new-project "project-true-eco-benefit" [true-eco-benefit-from-proj] of potential-project
-      table:put new-project "project-investor-estimated-aiv" estimated-aiv-potential-project
-
-      set current-projects fput new-project current-projects
-      move-to table:get new-project "project-location"
-      set new-project? true
-      ask table:get new-project "project-location" [
-        set proj-here? true
-      ]
-    ][
-      set heading random 360 ;; systematic search at some point
-      fd (10 + random 10)
-    ]
-  ]
-
-end
+;to look-for-new-project
+;  if cash >= 100 [
+;    let potential-project best-deal-near-me ([ability] of self)
+;    ifelse potential-project != nobody [
+;      let new-project table:make
+;      table:put new-project "project-location" potential-project
+;      table:put new-project "project-cost" [cost-of-proj] of potential-project
+;      table:put new-project "project-timeframe" [timeframe-of-proj] of potential-project
+;      table:put new-project "project-true-eco-benefit" [true-eco-benefit-from-proj] of potential-project
+;      table:put new-project "project-investor-estimated-aiv" estimated-aiv-potential-project
+;
+;      set current-projects fput new-project current-projects
+;      move-to table:get new-project "project-location"
+;      set new-project? true
+;      ask table:get new-project "project-location" [
+;        set proj-here? true
+;      ]
+;    ][
+;      set heading random 360 ;; systematic search at some point
+;      fd (10 + random 10)
+;    ]
+;  ]
+;end
 
 to-report best-deal-near-me [proj-investor-ability]
   let available-projects patches in-radius 7 with [proj-here? = false and cost-of-proj < [cash] of myself and ecological-health < 2000]
@@ -173,125 +176,125 @@ to-report best-deal-near-me [proj-investor-ability]
 end
 
 
-to select-min-redemption-price
-  let cost table:get item 0 current-projects "project-cost"
-  let time table:get item 0 current-projects "project-timeframe"
-  let estimated-aiv table:get item 0 current-projects "project-investor-estimated-aiv"
-  ;; where the COST stuff comes in, same as selecting price there
-  let min-redemption-price cost + (0.1 * cost) ;; min margin same for everyone, say 10%--> plus or percentage?
-  table:put item 0 current-projects "min-redemption-price" min-redemption-price
-end
+;to select-min-redemption-price
+;  let cost table:get item 0 current-projects "project-cost"
+;  let time table:get item 0 current-projects "project-timeframe"
+;  let estimated-aiv table:get item 0 current-projects "project-investor-estimated-aiv"
+;  ;; where the COST stuff comes in, same as selecting price there
+;  let min-redemption-price cost + (0.1 * cost) ;; min margin same for everyone, say 10%--> plus or percentage?
+;  table:put item 0 current-projects "min-redemption-price" min-redemption-price
+;end
 
 ;; legal stuff - in some places only certain currencies are allowed
-to choose-ops-node
-  ifelse random 100 < 80 [ ;; instead of random for later, include prediction of relative worth of currencies
-    let proj-ops-node one-of ops-nodes with [who = [home-country] of myself]
-    table:put item 0 current-projects "relevant-ops-node" proj-ops-node
-  ][
-    let proj-ops-node one-of ops-nodes with [who > count proj-investors]
-    table:put item 0 current-projects "relevant-ops-node" proj-ops-node
-  ]
-end
+
+;to choose-ops-node
+;  ifelse random 100 < 80 [ ;; instead of random for later, include prediction of relative worth of currencies
+;    let proj-ops-node one-of ops-nodes with [who = [home-country] of myself]
+;    table:put item 0 current-projects "relevant-ops-node" proj-ops-node
+;  ][
+;    let proj-ops-node one-of ops-nodes with [who > count proj-investors]
+;    table:put item 0 current-projects "relevant-ops-node" proj-ops-node
+;  ]
+;end
 
 
-
-to review-proposals
-  let agents-with-new-proposals-for-me proj-investors with [new-project? = true and table:get item 0 current-projects "relevant-ops-node" = myself]
-
-  ask agents-with-new-proposals-for-me [
-    let min-redemption-price table:get item 0 current-projects "min-redemption-price"
-    let cost table:get item 0 current-projects "project-cost"
-    let true-eco-benefit table:get item 0 current-projects "project-true-eco-benefit"
-    let time table:get item 0 current-projects "project-timeframe"
-    let current-ecological-health [ecological-health] of table:get item 0 current-projects "project-location"
-
-    let node-estimated-aiv round (random-normal true-eco-benefit true-eco-benefit / 4)
-
-    node-accept-or-reject node-estimated-aiv time current-ecological-health
-    table:put item 0 current-projects "do-project?" false
-
-    if table:get item 0 current-projects "proposal-result" = "accept" [
-      if node-estimated-aiv >= min-redemption-price [
-        accept-project node-estimated-aiv
-      ]
-    ]
-
-; old code with old rules, keeping for reference
+;to review-proposals
+;  let agents-with-new-proposals-for-me proj-investors with [new-project? = true and table:get item 0 current-projects "relevant-ops-node" = myself]
+;
+;  ask agents-with-new-proposals-for-me [
+;    let min-redemption-price table:get item 0 current-projects "min-redemption-price"
+;    let cost table:get item 0 current-projects "project-cost"
+;    let true-eco-benefit table:get item 0 current-projects "project-true-eco-benefit"
+;    let time table:get item 0 current-projects "project-timeframe"
+;    let current-ecological-health [ecological-health] of table:get item 0 current-projects "project-location"
+;
+;    let node-estimated-aiv round (random-normal true-eco-benefit true-eco-benefit / 4)
+;
+;    node-accept-or-reject node-estimated-aiv time current-ecological-health
+;    table:put item 0 current-projects "do-project?" false
+;
 ;    if table:get item 0 current-projects "proposal-result" = "accept" [
-;      ifelse random 100 < 70 [ ;; node agrees to proposed redemption price -- fine for random now, put in reporter for whether or not the node agrees (can change into non random for later)
-;        accept-project proposed-redemption-price
-;      ][ ;; else node suggests higher or lower price
-;        let node-redemption-price round random-normal (proposed-redemption-price) (proposed-redemption-price / 4)
-;        ifelse node-redemption-price >= proposed-redemption-price [ ;; agent automatically accepts if new price is higher
-;          accept-project node-redemption-price
-;        ][ ;; else if new price is lower, agent accepts/rejects with randomness
-;          if node-redemption-price > cost and random 100 < 70 [ ;; if these conditions are fulfilled the agent still accepts (shouldn't be random_
-;            accept-project node-redemption-price ;; privately proj investors have minimum price (if less than that then bye)
-;          ] ;; no need to write an else condition because the default do-project? is false
-;        ]
+;      if node-estimated-aiv >= min-redemption-price [
+;        accept-project node-estimated-aiv
 ;      ]
 ;    ]
-
-  ]
-end
-
-
-to node-accept-or-reject [node-estimated-aiv time current-ecological-health]
-  (ifelse current-ecological-health <= 100 [
-      table:put item 0 current-projects "proposal-result" "accept"
-    ] node-estimated-aiv / time < 150 [
-      table:put item 0 current-projects "proposal-result" "reject"
-    ][ ;; else
-      table:put item 0 current-projects "proposal-result" "accept"
-    ]
-  )
-end
-
-to accept-project [node-estimated-aiv]
-  table:put item 0 current-projects "node-estimated-aiv" node-estimated-aiv
-  table:put item 0 current-projects "do-project?" true
-end
-
-to update-project-info
-    if new-project? = true and table:get item 0 current-projects "do-project?" = false [
-      ;; ask patch to set proj-here false if project investor decided to not do project
-      ask table:get item 0 current-projects "project-location" [
-        set proj-here? false
-      ]
-      set new-project? false
-      ;; wipe the project data from current-projects
-      set current-projects remove-item 0 current-projects
-    ]
-    if new-project? = true and table:get item 0 current-projects "do-project?" = true [
-      set cash (cash - table:get item 0 current-projects "project-cost")
-      table:put item 0 current-projects "project-time-elapsed" 0
-    ]
-end
+;
+;; old code with old rules, keeping for reference
+;;    if table:get item 0 current-projects "proposal-result" = "accept" [
+;;      ifelse random 100 < 70 [ ;; node agrees to proposed redemption price -- fine for random now, put in reporter for whether or not the node agrees (can change into non random for later)
+;;        accept-project proposed-redemption-price
+;;      ][ ;; else node suggests higher or lower price
+;;        let node-redemption-price round random-normal (proposed-redemption-price) (proposed-redemption-price / 4)
+;;        ifelse node-redemption-price >= proposed-redemption-price [ ;; agent automatically accepts if new price is higher
+;;          accept-project node-redemption-price
+;;        ][ ;; else if new price is lower, agent accepts/rejects with randomness
+;;          if node-redemption-price > cost and random 100 < 70 [ ;; if these conditions are fulfilled the agent still accepts (shouldn't be random_
+;;            accept-project node-redemption-price ;; privately proj investors have minimum price (if less than that then bye)
+;;          ] ;; no need to write an else condition because the default do-project? is false
+;;        ]
+;;      ]
+;;    ]
+;
+;  ]
+;end
 
 
-to update-or-complete-project
-  foreach n-values length current-projects [i -> i] [ n ->
-    let time-now table:get item n current-projects "project-time-elapsed"
-    set time-now (time-now + 1)
-    table:put item n current-projects "project-time-elapsed" time-now ;; can also be a reporter to get diff in time
-  ]
+;to node-accept-or-reject [node-estimated-aiv time current-ecological-health]
+;  (ifelse current-ecological-health <= 100 [
+;      table:put item 0 current-projects "proposal-result" "accept"
+;    ] node-estimated-aiv / time < 150 [
+;      table:put item 0 current-projects "proposal-result" "reject"
+;    ][ ;; else
+;      table:put item 0 current-projects "proposal-result" "accept"
+;    ]
+;  )
+;end
 
-  let to-delete (list)
+;to accept-project [node-estimated-aiv]
+;  table:put item 0 current-projects "node-estimated-aiv" node-estimated-aiv
+;  table:put item 0 current-projects "do-project?" true
+;end
 
-  foreach n-values length current-projects [i -> i] [ n ->
-    if table:get item n current-projects "project-time-elapsed" = table:get item n current-projects "project-timeframe" [
-      set completed-projects (completed-projects + 1)
-      set to-delete fput n to-delete
-    ] ;; discrete event simulator
-  ]
-  foreach to-delete [ n ->
-    update-stats n
-    set current-projects remove-item n current-projects
-  ]
-end
+;to update-project-info
+;    if new-project? = true and table:get item 0 current-projects "do-project?" = false [
+;      ;; ask patch to set proj-here false if project investor decided to not do project
+;      ask table:get item 0 current-projects "project-location" [
+;        set proj-here? false
+;      ]
+;      set new-project? false
+;      ;; wipe the project data from current-projects
+;      set current-projects remove-item 0 current-projects
+;    ]
+;    if new-project? = true and table:get item 0 current-projects "do-project?" = true [
+;      set cash (cash - table:get item 0 current-projects "project-cost")
+;      table:put item 0 current-projects "project-time-elapsed" 0
+;    ]
+;end
+
+
+;to update-or-complete-project
+;  foreach n-values length current-projects [i -> i] [ n ->
+;    let time-now table:get item n current-projects "project-time-elapsed"
+;    set time-now (time-now + 1)
+;    table:put item n current-projects "project-time-elapsed" time-now ;; can also be a reporter to get diff in time
+;  ]
+;
+;  let to-delete (list)
+;
+;  foreach n-values length current-projects [i -> i] [ n ->
+;    if table:get item n current-projects "project-time-elapsed" = table:get item n current-projects "project-timeframe" [
+;      set completed-projects (completed-projects + 1)
+;      set to-delete fput n to-delete
+;    ] ;; discrete event simulator
+;  ]
+;  foreach to-delete [ n ->
+;    update-stats n
+;    set current-projects remove-item n current-projects
+;  ]
+;end
 
 to update-stats [project]
-  ;; update proj-investor cash
+  ;; update proj-investor cash - this is not core ERA because it's assuming proj investors cash in deposit receipts instantly
   let old-redemption-price table:get item project current-projects "node-estimated-aiv"
   ifelse random 100 < 85 [
     set cash (cash + old-redemption-price)
@@ -311,7 +314,6 @@ to update-stats [project]
     set proj-here? false
     set-new-project
   ]
-
 end
 
 to set-new-project ;; not core
