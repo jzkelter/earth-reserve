@@ -2,17 +2,15 @@ __includes ["ERAv2core.nls"]
 
 extensions [ table ]
 
-globals [ eri-currencies ]
-
 breed [ ops-nodes ops-node ]
 breed [ proj-investors proj-investor ]
 
 patches-own [
   country
   ecological-health
-  cost-of-proj ;; will be in own currency?, so outsiders will have to convert with ERI
+  cost-of-proj ;; will be in own currency?, so outsiders will have to convert with ERI eventually
   timeframe-of-proj
-  true-eco-benefit-from-proj
+  ideal-aiv-given-investment
   proj-counter
   proj-here?
 ]
@@ -23,18 +21,17 @@ proj-investors-own [
   current-projects
   ability
   new-project? ;; if investor got new project in this tick
-  completed-projects ;; to factor into ability
+  completed-projects
   estimated-aiv-potential-project
 ]
 
 
 to setup
   clear-all
-  set eri-currencies (list)
   setup-ops-nodes
   setup-proj-investors
   setup-patches
-  create-ops-nodes 1 [   ;; this is standing in for the decentralized ops-node (like a crypto)
+  create-ops-nodes 1 [  ;; this is standing in for the decentralized ops-node (like cryptos)
     set color white
     set shape "Circle (2)"
     set size 2
@@ -65,7 +62,7 @@ to setup-proj-investors
     set cash round random-normal 10000 1000
     set ability round random-normal 0.7 0.25
     if ability > 1 [set ability 1]
-    if ability < 0.11 [set ability 0.11]
+    if ability < 0.1 [set ability 0.1]
     set current-projects (list)
     set new-project? false
   ]
@@ -79,7 +76,13 @@ to setup-patches
     set proj-counter 0
     set timeframe-of-proj (2 + random 18)
     set cost-of-proj (round random-normal 200 45) * timeframe-of-proj
-    set true-eco-benefit-from-proj round (random-normal 300 40 * timeframe-of-proj - ln(ecological-health))
+    set ideal-aiv-given-investment round (random-normal 300 40 * timeframe-of-proj - ln(ecological-health))
+;    if ideal-aiv-given-investment < cost-of-proj [ ;; not necessarily true because some ecological projects can be net negative
+;      set ideal-aiv-given-investment cost-of-proj
+;    ]
+    ;; the -ln(eco health) in setting ideal aiv above is an attempt at incorporating diminishing returns
+    ;; make ideal aiv a function of cost too? do we want a function relationship or some randomness still?
+    ;; trying to find function f(current eco health, investment/cost of proj) and then can draw normals from what this function spits out
     set proj-here? false
   ]
 end
@@ -87,11 +90,9 @@ end
 ;; patches only have env health (change to topsoil quant and qual), no need for cost of project etc
 ;; dim returns for project, function --> given patch's current state, if you were to invest x, that would improve by y in ideal case
 ;; instead of true aiv, it's an "ideal" aiv --> mean benefit for x amount of resources, incorporating ability
-;; ability (mean benefit from given resources)
 
 ;; climate characteristics of patch (for later)
 ;; range of projects instead of one project with fixed benefit
-;; code above go is probably not core ERA code
 
 to go
   if (ticks > 0 and ticks mod 20 = 0) [
@@ -104,7 +105,7 @@ to go
     set new-project? false
     core.look-for-new-project
     if new-project? = true [
-      core.select-min-redemption-price
+      core.select-min-redemption-price ;; maybe should be min node AIV tolerated?
       core.choose-ops-node
     ]
   ]
@@ -120,49 +121,13 @@ to go
   tick
 end
 
-;to eco-degradation
-;  ask patches with [ecological-health > 1][ ;; something that asymptotes, use a function instead of linear
-;      set ecological-health (ecological-health - 1)
-;      set pcolor ([color] of one-of ops-nodes with [who = [country] of myself] + (sqrt (ecological-health)) / 20)
-;    ]
-;    ask patches with [proj-here? = false] [
-;      set true-eco-benefit-from-proj round (random-normal 300 40 * timeframe-of-proj - ln(ecological-health))
-;    ]
-;end
 
-;to look-for-new-project
-;  if cash >= 100 [
-;    let potential-project best-deal-near-me ([ability] of self)
-;    ifelse potential-project != nobody [
-;      let new-project table:make
-;      table:put new-project "project-location" potential-project
-;      table:put new-project "project-cost" [cost-of-proj] of potential-project
-;      table:put new-project "project-timeframe" [timeframe-of-proj] of potential-project
-;      table:put new-project "project-true-eco-benefit" [true-eco-benefit-from-proj] of potential-project
-;      table:put new-project "project-investor-estimated-aiv" estimated-aiv-potential-project
-;
-;      set current-projects fput new-project current-projects
-;      move-to table:get new-project "project-location"
-;      set new-project? true
-;      ask table:get new-project "project-location" [
-;        set proj-here? true
-;      ]
-;    ][
-;      set heading random 360 ;; systematic search at some point
-;      fd (10 + random 10)
-;    ]
-;  ]
-;end
-
+;; project investors try to find the best potential project from a subset of project locations
 to-report best-deal-near-me [proj-investor-ability]
   let available-projects patches in-radius 7 with [proj-here? = false and cost-of-proj < [cash] of myself and ecological-health < 2000]
-  let estimated-aiv round ((random-normal true-eco-benefit-from-proj true-eco-benefit-from-proj / 4) * (proj-investor-ability)) ;; set scale so no arbitrary multiplicative factors
+  let estimated-aiv round ((random-normal ideal-aiv-given-investment ideal-aiv-given-investment / 4) * (proj-investor-ability)) ;; set scale so no arbitrary multiplicative factors
   let estimated-cost round (cost-of-proj) ;; set estimated aiv similar scale to estimated cost
   let potential-project max-one-of available-projects [estimated-aiv - estimated-cost] ;; reports a patch
-
-;  show [estimated-aiv] of potential-project
-;  show [estimated-cost] of potential-project ;; estimated cost (actually doing the project + taxes to pay)
-;  show [estimated-aiv - estimated-cost] of potential-project
 
   if potential-project != nobody [
   ifelse [estimated-aiv - estimated-cost] of potential-project > 0.005 * ([cash] of self) [ ;; 0.01 is arbitrary - saying want a min return of 1% of their wealth
@@ -175,27 +140,7 @@ to-report best-deal-near-me [proj-investor-ability]
   report nobody
 end
 
-
-;to select-min-redemption-price
-;  let cost table:get item 0 current-projects "project-cost"
-;  let time table:get item 0 current-projects "project-timeframe"
-;  let estimated-aiv table:get item 0 current-projects "project-investor-estimated-aiv"
-;  ;; where the COST stuff comes in, same as selecting price there
-;  let min-redemption-price cost + (0.1 * cost) ;; min margin same for everyone, say 10%--> plus or percentage?
-;  table:put item 0 current-projects "min-redemption-price" min-redemption-price
-;end
-
 ;; legal stuff - in some places only certain currencies are allowed
-
-;to choose-ops-node
-;  ifelse random 100 < 80 [ ;; instead of random for later, include prediction of relative worth of currencies
-;    let proj-ops-node one-of ops-nodes with [who = [home-country] of myself]
-;    table:put item 0 current-projects "relevant-ops-node" proj-ops-node
-;  ][
-;    let proj-ops-node one-of ops-nodes with [who > count proj-investors]
-;    table:put item 0 current-projects "relevant-ops-node" proj-ops-node
-;  ]
-;end
 
 
 ;to review-proposals
@@ -204,7 +149,7 @@ end
 ;  ask agents-with-new-proposals-for-me [
 ;    let min-redemption-price table:get item 0 current-projects "min-redemption-price"
 ;    let cost table:get item 0 current-projects "project-cost"
-;    let true-eco-benefit table:get item 0 current-projects "project-true-eco-benefit"
+;    let true-eco-benefit table:get item 0 current-projects "project-ideal-aiv"
 ;    let time table:get item 0 current-projects "project-timeframe"
 ;    let current-ecological-health [ecological-health] of table:get item 0 current-projects "project-location"
 ;
@@ -238,87 +183,35 @@ end
 ;  ]
 ;end
 
-
-;to node-accept-or-reject [node-estimated-aiv time current-ecological-health]
-;  (ifelse current-ecological-health <= 100 [
-;      table:put item 0 current-projects "proposal-result" "accept"
-;    ] node-estimated-aiv / time < 150 [
-;      table:put item 0 current-projects "proposal-result" "reject"
-;    ][ ;; else
-;      table:put item 0 current-projects "proposal-result" "accept"
-;    ]
-;  )
-;end
-
-;to accept-project [node-estimated-aiv]
-;  table:put item 0 current-projects "node-estimated-aiv" node-estimated-aiv
-;  table:put item 0 current-projects "do-project?" true
-;end
-
-;to update-project-info
-;    if new-project? = true and table:get item 0 current-projects "do-project?" = false [
-;      ;; ask patch to set proj-here false if project investor decided to not do project
-;      ask table:get item 0 current-projects "project-location" [
-;        set proj-here? false
-;      ]
-;      set new-project? false
-;      ;; wipe the project data from current-projects
-;      set current-projects remove-item 0 current-projects
-;    ]
-;    if new-project? = true and table:get item 0 current-projects "do-project?" = true [
-;      set cash (cash - table:get item 0 current-projects "project-cost")
-;      table:put item 0 current-projects "project-time-elapsed" 0
-;    ]
-;end
-
-
-;to update-or-complete-project
-;  foreach n-values length current-projects [i -> i] [ n ->
-;    let time-now table:get item n current-projects "project-time-elapsed"
-;    set time-now (time-now + 1)
-;    table:put item n current-projects "project-time-elapsed" time-now ;; can also be a reporter to get diff in time
-;  ]
-;
-;  let to-delete (list)
-;
-;  foreach n-values length current-projects [i -> i] [ n ->
-;    if table:get item n current-projects "project-time-elapsed" = table:get item n current-projects "project-timeframe" [
-;      set completed-projects (completed-projects + 1)
-;      set to-delete fput n to-delete
-;    ] ;; discrete event simulator
-;  ]
-;  foreach to-delete [ n ->
-;    update-stats n
-;    set current-projects remove-item n current-projects
-;  ]
-;end
-
+;; project investors run this procedure to update their variables if they're finised with a project
+;; the project location's ecological health is also updated here
 to update-stats [project]
   ;; update proj-investor cash - this is not core ERA because it's assuming proj investors cash in deposit receipts instantly
   let old-redemption-price table:get item project current-projects "node-estimated-aiv"
+  let reviewed-redemption-price round (random-normal old-redemption-price (old-redemption-price / 6))
   ifelse random 100 < 85 [
     set cash (cash + old-redemption-price)
   ][ ;; with some probability it's a different price because the node reassesses the aiv again
-    let new-redemption-price round random-normal old-redemption-price old-redemption-price / 6
-    set cash (cash + new-redemption-price)
+    set cash (cash + reviewed-redemption-price)
   ]
-  ;; update ability
+  ;; update project investor ability
   if ability < 1 [
     set ability (ability + 0.01)]
-  ;; update project status
+  ;; update project location ecological health
   let finished-project-location table:get item project current-projects "project-location"
-  let finished-project-true-eco-benefit table:get item project current-projects "project-true-eco-benefit"
+  let finished-project-ideal-aiv table:get item project current-projects "project-ideal-aiv" ;; not so sure what to add eco health by actually
   ask finished-project-location [
-    set ecological-health (ecological-health + finished-project-true-eco-benefit)
+    set ecological-health (ecological-health + finished-project-ideal-aiv)
     set proj-counter (proj-counter + 1)
     set proj-here? false
     set-new-project
   ]
 end
 
-to set-new-project ;; not core
+;; patches run this procedure to generate new projects if a project was just completed there
+to set-new-project
   set cost-of-proj (round random-normal 200 45) * timeframe-of-proj
-  set true-eco-benefit-from-proj round (random-normal 300 40 * timeframe-of-proj - ln(ecological-health))
+  set ideal-aiv-given-investment round (random-normal 300 40 * timeframe-of-proj - ln(ecological-health))
   set pcolor ([color] of one-of ops-nodes with [who = [country] of myself] + (sqrt (ecological-health)) / 20)
 end
 
