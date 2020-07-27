@@ -1,189 +1,143 @@
-;one property can be a location
-;**change all properties to assets for clarity**
-;**start using the time extension**
-to COST_table.setup
-  COST_table.setup_assets
-  set average-price total-value / num-assets
-  set assets sort-by [[p1 p2] -> table:get p1 "Price" < table:get p2 "Price"] assets
-  set average-ownership-length mean (map [d -> time:difference-between (table:get d "Date of purchase") dt "days"] assets)
-end
-
-to COST_table.setup_assets
-  let counter 0
-  ;put the code that generates an asset into a procedure
-  while [counter < num-assets] [
-    let new-asset table:make ;each property is a table
-    let price (random 100 + 1) ;it gets a random starting price
-    set total-value total-value + price ;adds the price to the total value
-    table:put new-asset "Price" price
-    table:put new-asset "Bought-at" (price - (random (price / 2) )) ;in the final model this won't be random
-    table:put new-asset "Date of purchase" (time:plus dt (random (- re-assessment-period * 365)) "day")
-    (ifelse 
-      asset-types = "ERA" [ 
-        let markdown random-float 0.5
-        table:put new-asset "Asset-type" "ERA"
-        let AIVs ts-create ["Assessment values"]
-        let days-since-purchase time:difference-between table:get new-asset "Date of purchase" dt "day"
-        let time-of-last-assessment (time:plus table:get new-asset "Date of purchase" (random days-since-purchase) "day")
-        set AIVs ts-add-row AIVs (list time-of-last-assessment (price * (1 - markdown)))
-        table:put new-asset "AIV assessments" AIVs ;maybe change this to a list of all AIV values that changes on the fly, initialize it to a list with 1 entry
-                                                                                                ;also make this a list of list which includes the time of the assesment for each value, meaning you don't need a separate value for "time of last assessment"
-        ;table:put new-asset "Severe events" (list)
-        table:put new-asset "Redemption date" (time:plus (table:get new-asset "Date of purchase") 75 "year") ;change to redemption date
+to-report COST.generate-asset [price bought-at date-of-purchase asset-type] ;the observer runs this procedure
+  let new-asset table:make
+  table:put new-asset "Price" price
+  table:put new-asset "Bought-at" bought-at
+  table:put new-asset "Date of purchase" date-of-purchase
+  table:put new-asset "Asset-type" asset-type
+  (ifelse 
+    asset-type = "ERA" [
+      let AIVs ts-create ["Assessment values"]
+      table:put new-asset "AIV assessments" AIVs
     ]
-      asset-types = "Income-generating"[
-        table:put new-asset "Asset-type" "Income-generating"
-        table:put new-asset "Income" (list (random 50 + 50))
-        let max-income-factor (random-normal 1.5 0.5)
-        if max-income-factor < 1 [set max-income-factor 1]
-        table:put new-asset "Max-income" ((first table:get new-asset "Income") * max-income-factor)
-    ])
-    table:put new-asset "In-transaction?" false
-     ;each property gets a random length-owned time
-    ;maybe up until here make everything prior its own procedure that reports a table - anything generic
-    ;make more of these things reporters
-    set assets fput new-asset assets
-    set counter counter + 1
-  ]
+    asset-type = "Income-generating"[
+      table:put new-asset "Asset-type" "Income-generating"
+      table:put new-asset "Income" (list (random 50 + 50))
+      let max-income-factor (random-normal 1.5 0.5)
+      if max-income-factor < 1 [set max-income-factor 1]
+      table:put new-asset "Max-income" ((first table:get new-asset "Income") * max-income-factor)
+    ]
+  )
+  table:put new-asset "In-transaction?" false
+  report new-asset
 end
 
-to COST_table.go
-  foreach assets[ a ->
+to COST.go [asset-list] ;the observer runs this proceudre
+  foreach ALL-ASSETS[ a ->
     table:put a "In-transaction?" true
-    if table:get a "Asset-type" = "ERA" [try-cash-in a]
+    if table:get a "Asset-type" = "ERA" [COST.collect-receipts a]
   ]
-  ask turtles [COST_table.transact]
-  calculate-average-value
-  if (time:difference-between start-date dt "years") mod tax-period = 0 [
+  ask turtles [COST.transact asset-list]
+  if (time:difference-between START-DATE DATE "years") mod tax-period = 0 [
     ask turtles [
-      pay-taxes
+      COST.pay-taxes
       set cash cash + income
     ]
   ]
 end
 
-to try-cash-in [asset] 
-  ifelse last last table:get asset "AIV assessments" = table:get asset "Price"[
+to COST.collect-receipts [asset] ;the "operations node" would run this procedure
+  ifelse COST.latest-assessment asset = table:get asset "Price"[
     let owner table:get asset "Owner"
     ask owner [
       set cash (cash + (first first table:get asset "AIV assessments"))
       set personal-assets remove asset personal-assets
       set tax-bill (tax-bill - (ERA-receipt-tax-rate * table:get asset "Price"))
     ]
-    set assets remove asset assets
+    set ALL-ASSETS remove asset ALL-ASSETS
   ][
-    if dt = table:get asset "Redemption date" [
+    if DATE = table:get asset "Redemption date" [
       let owner table:get asset "Owner"
       ask owner [
-        set cash (cash + (first first table:get asset "AIV assessments"))
+        set cash (cash + (COST.latest-assessment asset))
         set personal-assets remove asset personal-assets
         set tax-bill (tax-bill - (ERA-receipt-tax-rate * table:get asset "Price"))
       ]
-      set assets remove asset assets
+      set ALL-ASSETS remove asset ALL-ASSETS
     ]
   ]
 end
 
-to-report get-difference [a]
+to-report COST.price-to-AIV-ratio [a] ;the observer runs this proceudre
   let price table:get a "Price"
-  let AIV last last (table:get a "AIV assessments")
+  let AIV COST.latest-assessment a
   report (price / AIV)
 end
 
-to calculate-average-length-owned 
-  set average-ownership-length (mean (map [a -> time:difference-between (table:get a "Date-of-purchase") dt "days"] assets))
+to COST.calculate-average-length-owned ;the observer runs this procedure
+  set AVERAGE-OWNERSHIP-LENGTH (mean (map [a -> time:difference-between (table:get a "Date-of-purchase") DATE "days"] ALL-ASSETS))
 end
 
-to COST_table.transact
+to-report COST.latest-assessment [asset] ;the observer runs this procedure
+  report last last table:get asset "AIV assessments"
+end
+
+to COST.transact [assets] ;turtles run this procedure
   let current-turtle self
-  ;let counter 0
   let disposable-income cash - tax-bill
   let potential-assets filter [a -> table:get a "Price" < disposable-income and table:get a "In-transaction?" = true and table:get a "Owner" != current-turtle] assets
-  let ERA-assets shuffle (filter [a -> table:get a "Asset-type" = "ERA"] potential-assets)
-  foreach ERA-assets[a ->
-    let estimate COST_table.assess_value a
-    let price table:get a "Price"
-    if price < disposable-income and estimate > price[
-      let remaining-time (time:difference-between dt (table:get a "Redemption date") "year")
-      let remaining-tax-payments (remaining-time / tax-period)
-      let total-cost (table:get a "Price" + (remaining-tax-payments * ERA-receipt-tax-rate * estimate) + min-net-gain)
-      if estimate > total-cost[
-        ask one-of patches [set pcolor yellow]
-        set cash (cash - table:get a "Price")
-        set personal-assets fput a personal-assets
-        set tax-bill (tax-bill + (ERA-receipt-tax-rate * estimate))
-        set disposable-income cash - tax-bill
-        ask table:get a "Owner" [
-          set cash (cash + table:get a "Price")
-          set personal-assets remove a personal-assets
-          set tax-bill (tax-bill - (ERA-receipt-tax-rate * table:get a "Price"))
+  foreach potential-assets [a ->
+    let asset-type table:get a "Asset-type"
+    let current-price table:get a "Price"
+    (ifelse
+      asset-type = "ERA" [
+        let value-estimate COST.assess_value a
+        if current-price < disposable-income and value-estimate > current-price[
+          let remaining-time (time:difference-between DATE (table:get a "Redemption date") "year")
+          let remaining-tax-payments (remaining-time / tax-period)
+          let total-cost (current-price + (remaining-tax-payments * ERA-receipt-tax-rate))
+          if (value-estimate - total-cost) > min-net-gain [
+            set cash (cash - current-price)
+            set personal-assets fput a personal-assets
+            set tax-bill (tax-bill + (ERA-receipt-tax-rate * value-estimate))
+            set disposable-income cash - tax-bill
+            ask table:get a "Owner" [
+              set cash (cash + current-price)
+              set personal-assets remove a personal-assets
+              set tax-bill (tax-bill - (ERA-receipt-tax-rate * current-price))
+            ]
+            table:put a "Owner" current-turtle
+            table:put a "Bought-at" current-price
+            table:put a "Price" value-estimate
+            table:put a "Date of purchase" (time:copy DATE)
+            table:put a "In-transaction?" false
+          ]
         ]
-        table:put a "Owner" current-turtle
-        table:put a "Bought-at" (table:get a "Price")
-        table:put a "Price" estimate
-        table:put a "Date of purchase" ticks
-        table:put a "In-transaction?" false
-        ask one-of patches [set pcolor yellow]
       ]
-    ]
+      asset-type  = "Income-generating" [
+        let estimated-income COST.assess_value a 
+        let current-income first table:get a "Income"
+        if estimated-income > current-income [
+          let desired-profit-margin random-normal 1.05 0.01
+          if desired-profit-margin <= 1 [set desired-profit-margin 1]
+          let valued-price ((estimated-income * desired-profit-margin) / income-generating-asset-tax-rate)
+          if valued-price > table:get a "Price" [
+            set cash (cash - current-price)
+            set personal-assets fput a personal-assets
+            set tax-bill (tax-bill + (income-generating-asset-tax-rate * valued-price))
+            set disposable-income cash - tax-bill
+            ask table:get a "Owner" [
+              set cash (cash + current-price)
+              set personal-assets remove a personal-assets
+              set tax-bill (tax-bill - (income-generating-asset-tax-rate * current-price))
+              set income income - current-income
+            ]
+            table:put a "Owner" current-turtle
+            table:put a "Bought-at" current-price
+            table:put a "Price" valued-price
+            table:put a "Date of purchase" (time:copy DATE)
+            table:put a "In-transaction?" false
+          ]
+        ]
+      ]
+    )
   ]
-  let income-generating-assets shuffle (filter [a -> table:get a "Asset-type" = "Income-generating"] assets)
-  foreach income-generating-assets[a ->
-    let estimated-income COST_table.assess_value a
-    let current-income first table:get a "Income"
-    if estimated-income > current-income [
-      
-    ]
-  ]
-  ;represents a list of all the propreties a turtle could theoretically purchase
-;  while [length potential-assets > 0] [ ;thinking of maybe adding a max-transactions parameter, although I'm not sure if this is necessary
-;    let ERA-assets filter [a -> table:get a "Asset-type" = "ERA"] potential-assets ;I'm only working with ERAs right now, in the expanded model 
-;    ;there will be a list of properties for each asset type
-;    let prospective one-of ERA-assets
-;    let estimate COST_table.assess_value prospective
-;    if estimate > table:get prospective "Price"[
-;      let remaining-time ((table:get prospective "Redemption date" - ticks) / 365)
-;      let remaining-tax-payments (remaining-time / tax-period)
-;      let total-cost (table:get prospective "Price" + (remaining-tax-payments * ERA-receipt-tax-rate * estimate) + min-net-gain)
-;      if estimate > total-cost [
-;        set cash (cash - table:get prospective "Price")
-;        set personal-assets fput prospective personal-assets
-;        set tax-bill (tax-bill + (ERA-receipt-tax-rate * estimate))
-;        ask table:get prospective "Owner" [
-;          set cash (cash + table:get prospective "Price")
-;          set personal-assets remove prospective personal-assets
-;          set tax-bill (tax-bill - (ERA-receipt-tax-rate * table:get prospective "Price"))
-;        ]
-;        table:put prospective "Owner" current-turtle
-;        table:put prospective "Bought-at" (table:get prospective "Price")
-;        table:put prospective "Price" estimate
-;        table:put prospective "Date of purchase" ticks
-;        table:put prospective "In-transaction?" false
-;      ]
-;    ]
-;    set potential-assets filter [a -> table:get a "Price" < disposable-income and table:get a "In-transaction?" = true and table:get a "Owner" != current-turtle] assets
-;  ]
 end
 
-to-report COST_table.assess_value [asset]
+to-report COST.assess_value [asset] ;turtles run this procedure
   (ifelse
     table:get asset "Asset-type" = "ERA"[
-      let difference get-difference asset
-      let estimated-change 0
-      ;  ifelse length table:get asset "AIV assessments" > 1 [
-      ;    let average-change (map [[a1 a2] -> (first a2) / (first a1)] table:get asset "AIV assessments")
-      ;    let recent-change (first item 1 table:get asset "AIV assessments") / (first item 0 table:get asset "AIV assessments")
-      ;    ifelse average-change > recent-change [
-      ;      set estimated-change (recent-change * (random-normal 0.95 0.025))
-      ;    ][
-      ;      set estimated-change (recent-change * (random-normal 1.05 0.025))
-      ;    ]
-      ;  ][
-      ;    set estimated-change random-normal 1.05 0.025
-      ;  ]
-      ;  report (first first table:get asset "AIV assessments" * estimated-change)
-      let diference get-difference asset
-      report (random-normal (last last table:get asset "AIV assessments" * difference) (abs difference - 1))
+      let difference COST.price-to-AIV-ratio asset
+      report (random-normal (table:get asset "Price") (abs difference - 1))
     ]
     table:get asset "Asset-type" = "Income-generating" [
       let current-asset-income first table:get asset "Income"
@@ -208,30 +162,14 @@ to-report COST_table.assess_value [asset]
 
 end
 
-to calculate-average-value
-  set total-value sum (map [a -> table:get a "Price"] assets)
-  set average-price (total-value / num-assets)
-end
-
-to pay-taxes
+to COST.pay-taxes ;turtles run this procedure
   if tax-bill < cash [
     set cash cash - tax-bill
-    set ubi-fund ubi-fund + tax-bill
-  ]
-end
-
-to generate-severe-events
-  let ERA-receipts filter [a -> table:get a "Asset-type" = "ERA"] assets
-  let probability ((60 / 365) * (1 / 50))
-  foreach ERA-receipts [ a ->
-    if random-float 100 < probability [
-      ;let impact random-normal 0.8
-    ]
   ]
 end
 
 to re-assess-AIV
-  let ERA-receipts filter [a -> table:get a "Asset-type" = "ERA"] assets
+  let ERA-receipts filter [a -> table:get a "Asset-type" = "ERA"] ALL-ASSETS
   foreach ERA-receipts[ a ->
     
   ]

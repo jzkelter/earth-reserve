@@ -2,38 +2,39 @@ __includes["COST_table_algorithms.nls" "time-series.nls"]
 extensions [table time csv]
 
 globals[
-  assets
-  ubi-fund
-  total-value
-  average-price
-  average-ownership-length
-  dt
-  start-date
+  ALL-ASSETS ;ALL-ASSETS is a list of every asset available for trade
+  TOTAL-VALUE ;TOTAL-VALUE is the sum of the prices of all of the assets
+  DATE ;DATE is the current date of the model, it moves forward 1 day for every tic
+  START-DATE ;START-DATE is the date the model starts out on, this does not change over time
+  AVERAGE-PRICE ;AVERAGE-PRICE is the average price of all of the assets
+  AVERAGE-OWNERSHIP-LENGTH ;AVERAGE-OWNERSHIP-LENGTH is the average amount of time an asset has been owned
 ]
 
 turtles-own[
-  personal-assets
-  cash
-  tax-bill
-  min-net-gain
-  income
+  personal-assets ;personal-assets is a list of all assets a particular turtle owns
+  cash ;cash is the amount of money a turtle has available to spend
+  tax-bill ;tax-bill is the amount in taxes a turtle has to pay, this changes every time an asset is added
+           ;to or removed from personal-assets, turtles pay taxes once every "tax-period" years
+  min-net-gain ;min-net-gain represents the minimum amount of profit a turtle would want to make, this is
+               ;unique for every turtle
+  income ;income represents the amount of income a turtle will receive at constant intervals
 ]
 
-to setup
+to setup ;the observer runs this proceudre
   clear-all
-  set dt time:anchor-to-ticks (time:create "2000/01/01") 1 "day"
-  set start-date time:create "2000/01/01"
-  set total-value 0 ;total-value is the total value of all of the properties
-  set assets (list)
-  ask turtles [set tax-bill 0]
+  set DATE time:anchor-to-ticks (time:create "2000/01/01") 1 "day"
+  set START-DATE time:create "2000/01/01"
+  set TOTAL-VALUE 0
+  set ALL-ASSETS (list)
   create-turtles num-turtles[
-    set cash 150 ;how much cash each turtle starts out with
-    set personal-assets (list) ;the properties each turtle owns
+    set cash 200
+    set personal-assets (list)
     setxy random-xcor 0
     set shape "person"
     set min-net-gain random 20 + 1
+    set tax-bill 0
   ]
-  COST_table.setup
+  setup-ALL-ASSETS
   assign-owners
   ask turtles [
     set income random-normal tax-bill (0.125 * tax-bill)
@@ -41,8 +42,38 @@ to setup
   reset-ticks
 end
 
-to assign-owners
-  foreach assets [a ->
+to setup-ALL-ASSETS ;the observer runs this proceudre
+  let counter 0
+  let price ((random 100) + 1)
+  let bought-at (price - (random (price / 2)))
+  let date-of-purchase (time:plus DATE (random (- re-assessment-period * 365)) "day")
+  while [counter < num-assets] [
+    let new-asset 0
+    (ifelse
+      asset-types = "ERA" [
+        set new-asset COST.generate-asset price bought-at date-of-purchase "ERA"
+        let markdown random-float 0.5
+        let days-since-purchase time:difference-between table:get new-asset "Date of purchase" DATE "day"
+        let time-of-last-assessment (time:plus table:get new-asset "Date of purchase" (random days-since-purchase) "day")
+        let AIVs table:get new-asset "AIV assessments"
+        set AIVs ts-add-row AIVs (list time-of-last-assessment (price * (1 - markdown)))
+        table:put new-asset "AIV assessments" AIVs
+        table:put new-asset "Redemption date" (time:plus date-of-purchase 75 "year")
+      ]
+      asset-types = "Income-generating" [
+        set new-asset COST.generate-asset price bought-at date-of-purchase "Income-generating"
+      ]
+    )
+    set ALL-ASSETS fput new-asset ALL-ASSETS
+    set counter counter + 1
+  ]
+  set AVERAGE-PRICE TOTAL-VALUE / num-assets
+  set ALL-ASSETS sort-by [[p1 p2] -> table:get p1 "Price" < table:get p2 "Price"] ALL-ASSETS
+  ;set AVERAGE-OWNERSHIP-LENGTH mean (map [d -> time:difference-between (table:get d "Date of purchase") DATE "days"] ALL-ASSETS)
+end
+
+to assign-owners ;the observer runs this procedure
+  foreach ALL-ASSETS [a ->
     let new-owner one-of turtles with [length personal-assets = 0]
     if new-owner = nobody [set new-owner one-of turtles]
     table:put a "Owner" new-owner
@@ -61,8 +92,13 @@ to assign-owners
   ]
 end
 
-to go
-  COST_table.go
+to calculate-average-value ;the observer runs this procedure
+  set TOTAL-VALUE sum (map [a -> table:get a "Price"] ALL-ASSETS)
+  set AVERAGE-PRICE (TOTAL-VALUE / num-assets)
+end
+
+to go ;the observer runs this procedure
+  COST.go ALL-ASSETS
   tick
 end
 @#$#@#$#@
@@ -164,7 +200,7 @@ ERA-receipt-tax-rate
 ERA-receipt-tax-rate
 0
 0.01
-0.0025
+0.0069
 0.0001
 1
 NIL
@@ -258,7 +294,7 @@ true
 false
 "" ""
 PENS
-"default" 1.0 0 -16777216 true "" "plot mean (map [a -> table:get a \"Price\"] assets)"
+"default" 1.0 0 -16777216 true "" "plot mean (map [a -> table:get a \"Price\"] ALL-ASSETS)"
 
 SLIDER
 328
