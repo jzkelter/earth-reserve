@@ -163,9 +163,24 @@ to-report COST.assess_value [asset] ;turtles run this procedure
 end
 
 to COST.pay-taxes ;turtles run this procedure
-  if tax-bill < cash [
-    set cash cash - tax-bill
+  if tax-bill > cash [
+    while [tax-bill > cash] [
+      let asset-to-be-taken one-of personal-assets
+      (ifelse 
+        table:get asset-to-be-taken "Asset-type" = "ERA" [
+          set cash (cash + COST.latest-assessment asset-to-be-taken)
+          set tax-bill (tax-bill - (table:get asset-to-be-taken "Price" * ERA-receipt-tax-rate))
+        ]
+        table:get asset-to-be-taken "Asset-type" = "Income-generating" [
+          set cash (cash + (table:get asset-to-be-taken "Income" * (1 / income-generating-asset-tax-rate)))
+          set tax-bill (tax-bill - (table:get asset-to-be-taken "Price" * income-generating-asset-tax-rate))
+        ]
+      )
+      set personal-assets remove asset-to-be-taken personal-assets
+      set ALL-ASSETS remove asset-to-be-taken ALL-ASSETS
+    ]
   ]
+  set cash cash - tax-bill
 end
 
 to re-assess-AIV
