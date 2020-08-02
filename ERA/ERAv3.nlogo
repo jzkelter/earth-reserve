@@ -14,9 +14,6 @@ globals [
 patches-own [
   jurisdiction
   ecological-health
-  cost-of-proj ;; will be in own currency?, so outsiders will have to convert with ERI eventually
-  timeframe-of-proj
-  ideal-aiv-given-investment
   proj-counter
   proj-here?
 ]
@@ -27,9 +24,7 @@ proj-investors-own [
   potential-project
   current-projects
   ability
-  new-project? ;; if investor got new project in this tick
   completed-projects
-  estimated-aiv-potential-project
 ]
 
 ops-nodes-own [
@@ -85,7 +80,7 @@ to setup-proj-investors
     if ability < 0.1 [set ability 0.1]
     set potential-project (list)
     set current-projects (list)
-    set new-project? false ;; no need this after potential-project list is sorted out
+;    set new-project? false ;; no need this after potential-project list is sorted out
   ]
 end
 
@@ -108,10 +103,6 @@ to setup-patches
   ]
 end
 
-;; patches only have env health (change to topsoil quant and qual), no need for cost of project etc
-;; dim returns for project, function --> given patch's current state, if you were to invest x, that would improve by y in ideal case
-;; instead of true aiv, it's an "ideal" aiv --> mean benefit for x amount of resources, incorporating ability
-
 ;; climate characteristics of patch (for later)
 ;; range of projects instead of one project with fixed benefit
 
@@ -123,9 +114,9 @@ to go
   ask proj-investors [
     core.update-or-complete-project
 
-    set new-project? false
+;    set new-project? false
     core.look-for-new-project
-    if new-project? = true [
+    if potential-project != nobody [
       core.select-min-redemption-price ;; maybe should be min node AIV tolerated?
       core.choose-ops-node
     ]
@@ -145,12 +136,11 @@ end
 
 ;; consider legal stuff - in some places only certain currencies are allowed
 
-
 ;; project investors run this procedure to update their variables if they're finished with a project
 ;; the project location's ecological health is also updated here
-to update-stats [project]
+to update-stats [project] ;; project is a TABLE now
   ;; update proj-investor cash - this is not core ERA because it's assuming proj investors cash in deposit receipts instantly
-  let old-redemption-price table:get item project current-projects "node-estimated-aiv"
+  let old-redemption-price table:get project "node-estimated-aiv"
   let reviewed-redemption-price round (random-normal old-redemption-price (old-redemption-price / 6))
   ifelse random 100 < 85 [
     set cash (cash + old-redemption-price)
@@ -161,21 +151,15 @@ to update-stats [project]
   if ability < 1 [
     set ability (ability + 0.01)]
   ;; update project location ecological health
-  let finished-project-location table:get item project current-projects "project-location"
-  let finished-project-ideal-aiv table:get item project current-projects "project-ideal-aiv" ;; not so sure what to add eco health by actually
+  let finished-project-location table:get project "project-location"
+  let finished-project-goal-eco-health table:get project "goal-eco-health" ;; not so sure what to add eco health by actually
+
   ask finished-project-location [
-    set ecological-health (ecological-health + finished-project-ideal-aiv)
+    set ecological-health finished-project-goal-eco-health
     set proj-counter (proj-counter + 1)
     set proj-here? false
-    set-new-project
+    set pcolor scale-color ([color] of min-one-of CENTRALIZED-OPS-NODES [distance myself]) ecological-health -50 500
   ]
-end
-
-;; patches run this procedure to generate new projects if a project was just completed there
-to set-new-project
-  set cost-of-proj (round random-normal 200 45) * timeframe-of-proj
-  set ideal-aiv-given-investment round (random-normal 300 40 * timeframe-of-proj - ln(ecological-health))
-  set pcolor scale-color ([color] of one-of CENTRALIZED-OPS-NODES with [node-jurisdiction = [jurisdiction] of myself]) ecological-health 0 5000
 end
 
 ;; risk assessment (cost of project would be distribution, some projects will have more risk)
