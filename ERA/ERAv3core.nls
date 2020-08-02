@@ -4,28 +4,16 @@ to core.eco-degradation
       set ecological-health (ecological-health - 1)
       set pcolor scale-color ([color] of one-of CENTRALIZED-OPS-NODES with [node-jurisdiction = [jurisdiction] of myself]) ecological-health -50 500
     ]
-;    ask patches with [proj-here? = false] [
-;      set ideal-aiv-given-investment round ((random-normal 300 40) * timeframe-of-proj - ln(ecological-health))
-;    ]
 end
 
 ;; project investors run this procedure to document the characteristics of the potential project (if there is one)
 ;; if there isn't one they move to a new place (randomly for now)
 to core.look-for-new-project
-  if cash >= 100 [
-;    let potential-project core.best-deal-near-me
+  let bankruptcy-line 100
+  if cash >= bankruptcy-line [
     set potential-project core.best-deal-near-me
-    ifelse potential-project != nobody [
-;      let new-project table:make
-;      table:put new-project "project-location" potential-project
-;      table:put new-project "project-cost" [cost-of-proj] of potential-project
-;      table:put new-project "project-timeframe" [timeframe-of-proj] of potential-project
-;      table:put new-project "project-ideal-aiv" [ideal-aiv-given-investment] of potential-project
-;      table:put new-project "project-investor-estimated-aiv" estimated-aiv-potential-project
-
-      set current-projects fput potential-project current-projects
+    ifelse potential-project != nobody [     
       move-to table:get potential-project "project-location"
-      set new-project? true
       ask table:get potential-project "project-location" [
         set proj-here? true
       ]
@@ -39,66 +27,78 @@ end
 ;; project investors try to find the best potential project from a subset of project locations
 to-report core.best-deal-near-me
   let max-eco-health-for-proj 1000 ;; arbitrary for now, if health is greater than this number, the patch will not be considered for a project
-  let available-projects patches in-radius 7 with [proj-here? = false and ecological-health < max-eco-health-for-proj]
-  
-  ;let potential-project-patch max-one-of available-projects [calculate-potential-project-returns] ;; reports a patch
+  let potential-projects patches in-radius 7 with [proj-here? = false 
+                                                   and ecological-health < max-eco-health-for-proj
+                                                   and ecological-health < calculate-optimal-health [ability] of myself]
 
   ;; now find the most profitable project based on new method *here*
-  let patches-below-optimal-health available-projects with [ecological-health < calculate-optimal-health [ability] of myself]
+  let proj-investor-ability [ability] of self
+  let potential-project-patch max-one-of potential-projects [calculate-estimated-profit (ecological-health) (calculate-optimal-health [ability] of myself) (proj-investor-ability)]
   
-  let potential-project-patch max-one-of patches-below-optimal-health [calculate-estimated-profit ([ecological-health] of self) (calculate-optimal-health [ability] of myself)]
+  let potential-project-rent-improvement 0
+  let potential-project-cost 0
+  let potential-project-profit 0
+  let potential-project-goal-eco-health 0
   
-  let potential-project-rent-improvement calculate-estimated-aiv ([ecological-health] of potential-project-patch) (calculate-optimal-health [ability] of self)
-  let potential-project-cost calculate-estimated-cost ([ecological-health] of potential-project-patch) (calculate-optimal-health [ability] of self)
-  let potential-project-profit (potential-project-rent-improvement - potential-project-cost)
+  if potential-project-patch != nobody [
+    set potential-project-rent-improvement calculate-estimated-aiv ([ecological-health] of potential-project-patch) (calculate-optimal-health [ability] of self)
+    set potential-project-cost calculate-estimated-cost ([ecological-health] of potential-project-patch) (calculate-optimal-health [ability] of self) (proj-investor-ability)
+    set potential-project-profit (potential-project-rent-improvement - potential-project-cost)
+    set potential-project-goal-eco-health calculate-optimal-health [ability] of self
+  ]
   
-  let min-return-wanted 0.001 ;; arbitrary, saying PIs want a return of at least 0.1% of their current cash
+  ;; if the project investor cannot afford raising the health all the way to optimal, they do the same project but just invest everything they have
+  if potential-project-cost > [cash] of self [
+    set potential-project-cost [cash] of self
+    let new-eco-health-given-max-investment sqrt((2 * [ability] of self * c1 * potential-project-cost) - c2 ^ 2) - c2
+    set potential-project-rent-improvement calculate-estimated-aiv ([ecological-health] of potential-project-patch) new-eco-health-given-max-investment
+    set potential-project-profit (potential-project-rent-improvement - potential-project-cost)
+    set potential-project-goal-eco-health new-eco-health-given-max-investment
+  ]
   
-  ifelse potential-project-patch != nobody and potential-project-rent-improvement >= NODE-MIN-PROJECT-SIZE and potential-project-cost <= [cash] of self and potential-project-profit > min-return-wanted * ([cash] of self) [
+  let min-return-wanted 0.1 ;; saying project investors want a 10% return on their investment based on their estimates
+  
+;  show potential-project-rent-improvement
+;  show potential-project-cost
+;  show potential-project-profit
+  
+  ifelse potential-project-patch != nobody 
+  and potential-project-rent-improvement >= NODE-MIN-PROJECT-SIZE 
+  and potential-project-cost <= [cash] of self  ;; probably don't need this again, given check above
+  and potential-project-profit >= potential-project-cost * min-return-wanted [
     
     let potential-project-table table:make
     table:put potential-project-table "project-location" potential-project-patch
     table:put potential-project-table "current-eco-health" [ecological-health] of potential-project-patch
-    table:put potential-project-table "project-estimated-aiv" potential-project-rent-improvement
+    table:put potential-project-table "project-investor-estimated-aiv" potential-project-rent-improvement
     table:put potential-project-table "project-cost" potential-project-cost
+    table:put potential-project-table "project-timeframe" (potential-project-rent-improvement) / 10
+    table:put potential-project-table "goal-eco-health" potential-project-goal-eco-health
     
     report potential-project-table
   ][
     report nobody
   ]
-  
-;  ifelse potential-project != nobody and [estimated-aiv - estimated-cost] of potential-project > min-return-wanted * ([cash] of self) [
-;      set estimated-aiv-potential-project [estimated-aiv] of potential-project
-;      report potential-project
-;  ] [
-;    report nobody
-;    ]
 end
-
-;to-report calculate-potential-project-returns
-;  let estimated-aiv round ((random-normal ideal-aiv-given-investment ideal-aiv-given-investment / 4) * ([ability] of self))
-;  let estimated-cost round (cost-of-proj)
-;  report (estimated-aiv - estimated-cost)
-;end
 
 
 to-report calculate-estimated-aiv [old-eco-health new-eco-health]
   report calculate-rent new-eco-health - calculate-rent old-eco-health
 end
 
-to-report calculate-estimated-cost [old-eco-health new-eco-health]
-  report calculate-investment new-eco-health ([ability] of myself) - calculate-investment old-eco-health ([ability] of myself)
+to-report calculate-estimated-cost [old-eco-health new-eco-health proj-investor-ability]
+  report calculate-investment new-eco-health proj-investor-ability - calculate-investment old-eco-health proj-investor-ability
 end
 
-to-report calculate-estimated-profit [old-eco-health new-eco-health]
-  report calculate-estimated-aiv old-eco-health new-eco-health - calculate-estimated-cost old-eco-health new-eco-health
+to-report calculate-estimated-profit [old-eco-health new-eco-health proj-investor-ability]
+  report calculate-estimated-aiv old-eco-health new-eco-health - calculate-estimated-cost old-eco-health new-eco-health proj-investor-ability
 end
 
 to-report calculate-rent [eco-health]
   report c0 * ln(eco-health)
 end
 
-to-report calculate-investment [eco-health proj-investor-ability]
+to-report calculate-investment [eco-health proj-investor-ability] ;; investment needed to get from 0 health to (eco-health) level
   report ((eco-health ^ 2) / (2 * proj-investor-ability * c1)) + ((c2 * eco-health) / (proj-investor-ability * c1))
 end
 
@@ -108,23 +108,14 @@ end
 
 
 
-
-;to-report expected-eco-improvement-per-dollar [current-eco-health]
-;  let value (500 / (current-eco-health + 20))
-;  ifelse value < 1 [report 1][report value]
-;end
-
-
-
-
 ;; project investors run this procedure to set a minimum aiv they are willing to tolerate
 ;; to be used in their decision making during proposal to the node later
 to core.select-min-redemption-price
-  let cost table:get item 0 current-projects "project-cost"
+  let cost table:get potential-project "project-cost"
   ;; where the COST stuff comes in, same as selecting price there
   let min-return 1.1
   let min-redemption-price cost * min-return
-  table:put item 0 current-projects "min-redemption-price" min-redemption-price
+  table:put potential-project "min-redemption-price" min-redemption-price
 end
 
 ;; project investors run this procedure to choose which operations node they want to transact with
@@ -133,13 +124,13 @@ to core.choose-ops-node
   let prob-choose-home-ops-node 80 ;; arbitrary for now
   ifelse random 100 < prob-choose-home-ops-node [ ;; instead of random for later, include prediction of relative worth of currencies
     let proj-ops-node one-of CENTRALIZED-OPS-NODES with [node-jurisdiction = [home-jurisdiction] of myself]
-    table:put item 0 current-projects "relevant-ops-node" proj-ops-node
+    table:put potential-project "relevant-ops-node" proj-ops-node
     ask proj-ops-node [
       set proj-investors-with-new-projects-for-me fput myself proj-investors-with-new-projects-for-me
     ]
   ][
     let proj-ops-node one-of DECENTRALIZED-OPS-NODES
-    table:put item 0 current-projects "relevant-ops-node" proj-ops-node
+    table:put potential-project "relevant-ops-node" proj-ops-node
     ask proj-ops-node [
       set proj-investors-with-new-projects-for-me fput myself proj-investors-with-new-projects-for-me
     ]
@@ -149,82 +140,77 @@ end
 ;; operations nodes run this procedure to assess the proposal of project investors who come to them
 ;; within this procedure they estimate their own aiv of the proposed project
 to core.review-proposals
-  let agents-with-new-proposals-for-me proj-investors with [new-project? = true and table:get item 0 current-projects "relevant-ops-node" = myself]
+  let relevant-project-investors turtle-set [proj-investors-with-new-projects-for-me] of self
 
-  ask agents-with-new-proposals-for-me [
-    let min-redemption-price table:get item 0 current-projects "min-redemption-price"
-    let proj-investor-estimated-aiv table:get item 0 current-projects "project-investor-estimated-aiv"
-    let time table:get item 0 current-projects "project-timeframe"
-    let current-ecological-health [ecological-health] of table:get item 0 current-projects "project-location"
+  ask relevant-project-investors [
+    ;; proj-investor-estimate-aiv already takes into account investor's ability (through optimal health)
     
-    ;; assuming node knows project investor's ability - alternatively can use proj investor completed projects as proxy
-    let node-estimated-aiv round (random-normal proj-investor-estimated-aiv (proj-investor-estimated-aiv / 7))
+    table:put potential-project "do-project?" false
     
-    core.node-accept-or-reject node-estimated-aiv time current-ecological-health
-    table:put item 0 current-projects "do-project?" false
-        
-    if table:get item 0 current-projects "proposal-result" = "accept" [
-      if node-estimated-aiv >= min-redemption-price [
-        core.accept-project node-estimated-aiv
-      ]
-    ]
+    core.node-accept-or-reject potential-project
   ]
 end
 
 ;; operations nodes run this procedure to make a decision on their proposal assessment
-to core.node-accept-or-reject [node-estimated-aiv time current-ecological-health]
-  (ifelse current-ecological-health <= 100 [ ;; if current eco health too low it's an auto accept
-      table:put item 0 current-projects "proposal-result" "accept"
-    ] node-estimated-aiv / time < 150 [
-      table:put item 0 current-projects "proposal-result" "reject"
-    ][ ;; else
-      table:put item 0 current-projects "proposal-result" "accept"
+to core.node-accept-or-reject [potential-project-table]
+  
+  let min-redemption-price table:get potential-project-table "min-redemption-price"
+  let proj-investor-estimated-aiv table:get potential-project-table "project-investor-estimated-aiv"
+  let node-estimated-aiv round (random-normal proj-investor-estimated-aiv (proj-investor-estimated-aiv / 7)) ;; assumes the estimation is more or less the same
+ 
+  ifelse node-estimated-aiv < NODE-MIN-PROJECT-SIZE [ ;; there's already the global var NODE-MIN-PROJECT-SIZE and potential project was already filtered for it? but there's a chance the node estimation is lower
+      table:put potential-project "proposal-result" "reject"
+    ][ 
+      table:put potential-project "proposal-result" "accept"
     ]
-  )
+  
+  if table:get potential-project "proposal-result" = "accept" and node-estimated-aiv >= min-redemption-price [
+      core.proj-investor-accept node-estimated-aiv
+    ]
 end
 
 ;; operations node run this procedure to update the current project list of project investors 
 ;; if they accept the project and the project investor goes through with it
-to core.accept-project [node-estimated-aiv]
-  table:put item 0 current-projects "node-estimated-aiv" node-estimated-aiv
-  table:put item 0 current-projects "do-project?" true
+to core.proj-investor-accept [node-estimated-aiv]
+  table:put potential-project "node-estimated-aiv" node-estimated-aiv
+  table:put potential-project "do-project?" true
 end
 
 ;; project investors run this procedure
 to core.update-project-info
-    if new-project? = true and table:get item 0 current-projects "do-project?" = false [
+  if potential-project != nobody and table:get potential-project "do-project?" = false [
       ;; ask patch to set proj-here false if project investor decided to not do project
-      ask table:get item 0 current-projects "project-location" [
+      ask table:get potential-project "project-location" [
         set proj-here? false
       ]
-      set new-project? false
-      ;; wipe the project data from current-projects
-      set current-projects remove-item 0 current-projects
     ]
-    if new-project? = true and table:get item 0 current-projects "do-project?" = true [
-      set cash (cash - table:get item 0 current-projects "project-cost")
-      table:put item 0 current-projects "project-time-elapsed" 0
+  if potential-project != nobody and table:get potential-project "do-project?" = true [
+      set cash (cash - table:get potential-project "project-cost")
+      table:put potential-project "project-time-elapsed" 0
     ]
+  set potential-project (list)
+  ask ops-nodes [
+    set proj-investors-with-new-projects-for-me (list)
+  ]
 end
 
 ;; project investors run this procedure to keep track of progress of their current projects
 to core.update-or-complete-project
-  foreach n-values length current-projects [i -> i] [ n ->
-    let time-now table:get item n current-projects "project-time-elapsed"
-    set time-now (time-now + 1)
-    table:put item n current-projects "project-time-elapsed" time-now ;; can also be a reporter to get diff in time
-  ]
-
   let to-delete (list)
-
-  foreach n-values length current-projects [i -> i] [ n ->
-    if table:get item n current-projects "project-time-elapsed" = table:get item n current-projects "project-timeframe" [
+  
+  foreach current-projects [ proj -> 
+    let time-now table:get proj "project-time-elapsed"
+    set time-now (time-now + 1)
+    table:put proj "project-time-elapsed" time-now ;; can also be a reporter to get diff in time
+    
+    if table:get proj "project-time-elapsed" = table:get proj "project-timeframe" [
       set completed-projects (completed-projects + 1)
-      set to-delete fput n to-delete
-    ] ;; discrete event simulator
+      set to-delete fput proj to-delete
+    ]
   ]
-  foreach to-delete [ n ->
-    update-stats n
-    set current-projects remove-item n current-projects
+  
+  foreach to-delete [ proj ->
+    update-stats proj
+    set current-projects remove proj current-projects
   ]
 end
