@@ -2,7 +2,7 @@
 to core.eco-degradation
   ask patches with [ecological-health > 1][ ;; something that asymptotes, use a function instead of linear
       set ecological-health (ecological-health - 1)
-      set pcolor scale-color ([color] of one-of CENTRALIZED-OPS-NODES with [node-jurisdiction = [jurisdiction] of myself]) ecological-health -50 300
+      set pcolor scale-color ([color] of one-of CENTRALIZED-OPS-NODES with [node-jurisdiction = [jurisdiction] of myself]) ecological-health -200 300
     ]
 end
 
