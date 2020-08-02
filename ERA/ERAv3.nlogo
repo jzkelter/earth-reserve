@@ -87,7 +87,7 @@ end
 to setup-patches
   ask patches [
     set ecological-health (1 + random 100)
-    set pcolor scale-color ([color] of min-one-of CENTRALIZED-OPS-NODES [distance myself]) ecological-health -50 500
+    set pcolor scale-color ([color] of min-one-of CENTRALIZED-OPS-NODES [distance myself]) ecological-health -50 300
     set jurisdiction [node-jurisdiction] of min-one-of CENTRALIZED-OPS-NODES [distance myself]
 ;    set proj-counter 0
 ;    set timeframe-of-proj (2 + random 18)
@@ -158,7 +158,7 @@ to update-stats [project] ;; project is a TABLE now
     set ecological-health finished-project-goal-eco-health
     set proj-counter (proj-counter + 1)
     set proj-here? false
-    set pcolor scale-color ([color] of min-one-of CENTRALIZED-OPS-NODES [distance myself]) ecological-health -50 500
+    set pcolor scale-color ([color] of min-one-of CENTRALIZED-OPS-NODES [distance myself]) ecological-health -50 300
   ]
 end
 
