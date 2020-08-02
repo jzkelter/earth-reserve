@@ -86,7 +86,7 @@ end
 to setup-patches
   ask patches [
     set ecological-health (1 + random 100)
-    set pcolor scale-color ([color] of min-one-of CENTRALIZED-OPS-NODES [distance myself]) ecological-health -50 300
+    set pcolor scale-color ([color] of min-one-of CENTRALIZED-OPS-NODES [distance myself]) ecological-health -200 300
     set jurisdiction [node-jurisdiction] of min-one-of CENTRALIZED-OPS-NODES [distance myself]
     set proj-here? false
   ]
@@ -130,10 +130,11 @@ end
 to update-stats [project] ;; project is a TABLE now
   ;; update proj-investor cash - this is not core ERA because it's assuming proj investors cash in deposit receipts instantly
   let old-redemption-price table:get project "node-estimated-aiv"
+  ;; for now with some probability the node will change its estimated price (because it's reassessed at the project's completion)
   let reviewed-redemption-price round (random-normal old-redemption-price (old-redemption-price / 6))
   ifelse random 100 < 85 [
     set cash (cash + old-redemption-price)
-  ][ ;; with some probability it's a different price because the node reassesses the aiv again
+  ][
     set cash (cash + reviewed-redemption-price)
   ]
   ;; update project investor ability
@@ -141,13 +142,12 @@ to update-stats [project] ;; project is a TABLE now
     set ability (ability + 0.01)]
   ;; update project location ecological health
   let finished-project-location table:get project "project-location"
-  let finished-project-goal-eco-health table:get project "goal-eco-health" ;; not so sure what to add eco health by actually
-
+  let finished-project-goal-eco-health table:get project "goal-eco-health"
   ask finished-project-location [
     set ecological-health finished-project-goal-eco-health
     set proj-counter (proj-counter + 1)
     set proj-here? false
-    set pcolor scale-color ([color] of min-one-of CENTRALIZED-OPS-NODES [distance myself]) ecological-health -50 300
+    set pcolor scale-color ([color] of min-one-of CENTRALIZED-OPS-NODES [distance myself]) ecological-health -200 300
   ]
 end
 
