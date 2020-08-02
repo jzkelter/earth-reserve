@@ -72,7 +72,7 @@ to-report core.best-deal-near-me
     table:put potential-project-table "current-eco-health" [ecological-health] of potential-project-patch
     table:put potential-project-table "project-investor-estimated-aiv" potential-project-rent-improvement
     table:put potential-project-table "project-cost" potential-project-cost
-    table:put potential-project-table "project-timeframe" (potential-project-rent-improvement) / 10
+    table:put potential-project-table "project-timeframe" round ((potential-project-rent-improvement) / 10) + 1
     table:put potential-project-table "goal-eco-health" potential-project-goal-eco-health
     
     report potential-project-table
@@ -187,8 +187,8 @@ to core.update-project-info
   if potential-project != nobody and table:get potential-project "do-project?" = true [
       set cash (cash - table:get potential-project "project-cost")
       table:put potential-project "project-time-elapsed" 0
+      set current-projects fput potential-project current-projects
     ]
-  set potential-project (list)
   ask ops-nodes [
     set proj-investors-with-new-projects-for-me (list)
   ]
@@ -213,4 +213,6 @@ to core.update-or-complete-project
     update-stats proj
     set current-projects remove proj current-projects
   ]
+  
+  set potential-project (list)
 end
