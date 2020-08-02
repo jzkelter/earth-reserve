@@ -80,7 +80,6 @@ to setup-proj-investors
     if ability < 0.1 [set ability 0.1]
     set potential-project (list)
     set current-projects (list)
-;    set new-project? false ;; no need this after potential-project list is sorted out
   ]
 end
 
@@ -89,16 +88,6 @@ to setup-patches
     set ecological-health (1 + random 100)
     set pcolor scale-color ([color] of min-one-of CENTRALIZED-OPS-NODES [distance myself]) ecological-health -50 300
     set jurisdiction [node-jurisdiction] of min-one-of CENTRALIZED-OPS-NODES [distance myself]
-;    set proj-counter 0
-;    set timeframe-of-proj (2 + random 18)
-;    set cost-of-proj (round random-normal 200 45) * timeframe-of-proj
-;    set ideal-aiv-given-investment round (random-normal 300 40 * timeframe-of-proj - ln(ecological-health))
-;    if ideal-aiv-given-investment < cost-of-proj [ ;; not necessarily true because some ecological projects can be net negative
-;      set ideal-aiv-given-investment cost-of-proj
-;    ]
-    ;; the -ln(eco health) in setting ideal aiv above is an attempt at incorporating diminishing returns
-    ;; make ideal aiv a function of cost too? do we want a function relationship or some randomness still?
-    ;; trying to find function f(current eco health, investment/cost of proj) and then can draw normals from what this function spits out
     set proj-here? false
   ]
 end
