@@ -13,23 +13,24 @@ globals [
 
 patches-own [
   jurisdiction
-  ecological-health
-  proj-counter
+  ecological-health    ;; combined metric of topsoil depth and topsoil quality
+  proj-counter         ;; just a number
   proj-here?
 ]
 
 proj-investors-own [
   home-jurisdiction
   cash
-  potential-project
-  current-projects
-  ability
-  completed-projects
+  potential-project    ;; a table that starts out empty every tick
+  current-projects     ;; a list of tables
+  ability              ;; just a number
+  completed-projects   ;; just a number
+  deposit-receipts     ;; can be a table too later
 ]
 
 ops-nodes-own [
   node-jurisdiction
-  proj-investors-with-new-projects-for-me
+  proj-investors-with-new-projects-for-me  ;; a new list of turtles every tick
 ]
 
 to setup
@@ -63,7 +64,7 @@ to setup-ops-nodes
   ]
   set CENTRALIZED-OPS-NODES ops-nodes with [node-jurisdiction != "decentralized"]
   set DECENTRALIZED-OPS-NODES ops-nodes with [node-jurisdiction = "decentralized"]
-  set NODE-MIN-PROJECT-SIZE 1
+  set NODE-MIN-PROJECT-SIZE 10 ;; arbitrary for now, can be slider or hooked to something later
 end
 
 
@@ -80,6 +81,7 @@ to setup-proj-investors
     if ability < 0.1 [set ability 0.1]
     set potential-project (list)
     set current-projects (list)
+    set deposit-receipts (list)
   ]
 end
 
@@ -102,8 +104,6 @@ to go
 
   ask proj-investors [
     core.update-or-complete-project
-
-;    set new-project? false
     core.look-for-new-project
     if potential-project != nobody [
       core.select-min-redemption-price ;; maybe should be min node AIV tolerated?
@@ -122,34 +122,7 @@ to go
   tick
 end
 
-
 ;; consider legal stuff - in some places only certain currencies are allowed
-
-;; project investors run this procedure to update their variables if they're finished with a project
-;; the project location's ecological health is also updated here
-to update-stats [project] ;; project is a TABLE now
-  ;; update proj-investor cash - this is not core ERA because it's assuming proj investors cash in deposit receipts instantly
-  let old-redemption-price table:get project "node-estimated-aiv"
-  ;; for now with some probability the node will change its estimated price (because it's reassessed at the project's completion)
-  let reviewed-redemption-price round (random-normal old-redemption-price (old-redemption-price / 6))
-  ifelse random 100 < 85 [
-    set cash (cash + old-redemption-price)
-  ][
-    set cash (cash + reviewed-redemption-price)
-  ]
-  ;; update project investor ability
-  if ability < 1 [
-    set ability (ability + 0.01)]
-  ;; update project location ecological health
-  let finished-project-location table:get project "project-location"
-  let finished-project-goal-eco-health table:get project "goal-eco-health"
-  ask finished-project-location [
-    set ecological-health finished-project-goal-eco-health
-    set proj-counter (proj-counter + 1)
-    set proj-here? false
-    set pcolor scale-color ([color] of min-one-of CENTRALIZED-OPS-NODES [distance myself]) ecological-health -200 300
-  ]
-end
 
 ;; risk assessment (cost of project would be distribution, some projects will have more risk)
 ;; point assessment ok for first
@@ -235,7 +208,7 @@ NIL
 SLIDER
 12
 104
-190
+164
 137
 num-proj-investors
 num-proj-investors
@@ -248,10 +221,10 @@ NIL
 HORIZONTAL
 
 PLOT
-4
-199
-256
-328
+17
+245
+269
+374
 num projects completed by an investor
 NIL
 NIL
@@ -266,10 +239,10 @@ PENS
 "default" 1.0 1 -16777216 true "" "histogram [completed-projects] of proj-investors\n"
 
 PLOT
-4
-335
-257
-485
+17
+381
+270
+531
 num projects completed on a patch
 NIL
 NIL
@@ -284,10 +257,10 @@ PENS
 "default" 1.0 1 -16777216 true "" "histogram [proj-counter] of patches"
 
 SLIDER
-53
-523
-225
-556
+178
+103
+316
+136
 c0
 c0
 0
@@ -299,10 +272,10 @@ NIL
 HORIZONTAL
 
 SLIDER
-53
-567
-225
-600
+178
+147
+315
+180
 c1
 c1
 0
@@ -314,19 +287,37 @@ NIL
 HORIZONTAL
 
 SLIDER
-53
-613
-225
-646
+178
+193
+315
+226
 c2
 c2
 0
 100
-1.0
+30.0
 1
 1
 NIL
 HORIZONTAL
+
+PLOT
+18
+538
+270
+685
+distribution of health of patches
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" "if min [ecological-health] of patches < max [ecological-health] of patches[\nset-plot-x-range min [ecological-health] of patches max [ecological-health] of patches]"
+PENS
+"default" 1.0 1 -16777216 true "" "histogram [ecological-health] of patches"
 
 @#$#@#$#@
 ## WHAT IS IT?
