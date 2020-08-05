@@ -31,7 +31,7 @@ to-report core.best-deal-near-me
                                                    and ecological-health < max-eco-health-for-proj
                                                    and ecological-health < calculate-optimal-health [ability] of myself]
 
-  ;; now find the most profitable project based on new method *here*
+  ;; now find the most profitable project based on new method (formulas)
   let proj-investor-ability [ability] of self
   let potential-project-patch max-one-of potential-projects [calculate-estimated-profit (ecological-health) (calculate-optimal-health [ability] of myself) (proj-investor-ability)]
   
@@ -58,10 +58,6 @@ to-report core.best-deal-near-me
   
   let min-return-wanted 0.1 ;; saying project investors want a 10% return on their investment based on their estimates
   
-;  show potential-project-rent-improvement
-;  show potential-project-cost
-;  show potential-project-profit
-  
   ifelse potential-project-patch != nobody 
   and potential-project-rent-improvement >= NODE-MIN-PROJECT-SIZE 
   and potential-project-cost <= [cash] of self  ;; probably don't need this again, given check above
@@ -81,9 +77,9 @@ to-report core.best-deal-near-me
   ]
 end
 
-
+;; randomness here reflects uncertanties/different beliefs in estimation
 to-report calculate-estimated-aiv [old-eco-health new-eco-health]
-  report calculate-rent new-eco-health - calculate-rent old-eco-health
+  report random-normal (calculate-rent new-eco-health - calculate-rent old-eco-health) ((calculate-rent new-eco-health - calculate-rent old-eco-health) / 5)
 end
 
 to-report calculate-estimated-cost [old-eco-health new-eco-health proj-investor-ability]
@@ -143,10 +139,7 @@ to core.review-proposals
   let relevant-project-investors turtle-set [proj-investors-with-new-projects-for-me] of self
 
   ask relevant-project-investors [
-    ;; proj-investor-estimate-aiv already takes into account investor's ability (through optimal health)
-    
     table:put potential-project "do-project?" false
-    
     core.node-accept-or-reject potential-project
   ]
 end
@@ -158,7 +151,7 @@ to core.node-accept-or-reject [potential-project-table]
   let proj-investor-estimated-aiv table:get potential-project-table "project-investor-estimated-aiv"
   let node-estimated-aiv round (random-normal proj-investor-estimated-aiv (proj-investor-estimated-aiv / 7)) ;; assumes the estimation is more or less the same
  
-  ifelse node-estimated-aiv < NODE-MIN-PROJECT-SIZE [ ;; there's already the global var NODE-MIN-PROJECT-SIZE and potential project was already filtered for it? but there's a chance the node estimation is lower
+  ifelse node-estimated-aiv < NODE-MIN-PROJECT-SIZE [ ;; potential project was already filtered for it, but there's a chance the node estimation is lower
       table:put potential-project "proposal-result" "reject"
     ][ 
       table:put potential-project "proposal-result" "accept"
@@ -176,7 +169,7 @@ to core.proj-investor-accept [node-estimated-aiv]
   table:put potential-project "do-project?" true
 end
 
-;; project investors run this procedure
+;; project investors run this procedure to update project information each tick
 to core.update-project-info
   if potential-project != nobody and table:get potential-project "do-project?" = false [
       ;; ask patch to set proj-here false if project investor decided to not do project
@@ -210,9 +203,49 @@ to core.update-or-complete-project
   ]
   
   foreach to-delete [ proj ->
-    update-stats proj
+    core.complete-project-and-get-deposit-receipt proj
+    core.update-patch-stats proj
     set current-projects remove proj current-projects
   ]
   
   set potential-project (list)
+end
+
+
+;; project investors run this procedure to get their deposit receipt (and check if they want to cash in immediately)
+;; the project investors also update their variables like abilty and cash (where applicable)
+to core.complete-project-and-get-deposit-receipt [project] ;; project is a TABLE now
+  let old-redemption-price-node table:get project "node-estimated-aiv"
+  let old-redemption-price-proj-investor table:get project "project-investor-estimated-aiv"
+  ;; the project gets reassessed at completion
+  let reviewed-redemption-price-node round (random-normal old-redemption-price-node (old-redemption-price-node / 6))
+  let reviewed-redemption-price-proj-investor round (random-normal old-redemption-price-proj-investor (old-redemption-price-proj-investor / 6))
+
+  let new-deposit-receipt table:make
+  table:put new-deposit-receipt "first-node-estimated-aiv" reviewed-redemption-price-node
+  table:put new-deposit-receipt "first-project-investor-estimated-aiv" reviewed-redemption-price-proj-investor
+  
+  ifelse reviewed-redemption-price-node >= reviewed-redemption-price-proj-investor [ ;; proj investor would want to cash in immediately
+    set cash (cash + reviewed-redemption-price-node)
+  ][ ;; proj investor would want to hold on to the deposit receipt as a financial security, time to decide price to set in the market
+    set deposit-receipts fput new-deposit-receipt deposit-receipts
+  ]
+
+  ;; determine the rest of the stream using time series from COST code
+
+  ;; update project investor ability
+  if ability < 1 [
+    set ability (ability + 0.01)]
+end
+
+;; project investors run this procedure to update (completed) project location ecological health
+to core.update-patch-stats [project]
+  let finished-project-location table:get project "project-location"
+  let finished-project-goal-eco-health table:get project "goal-eco-health"
+  ask finished-project-location [
+    set ecological-health finished-project-goal-eco-health
+    set proj-counter (proj-counter + 1)
+    set proj-here? false
+    set pcolor scale-color ([color] of min-one-of CENTRALIZED-OPS-NODES [distance myself]) ecological-health -200 300
+  ]
 end
