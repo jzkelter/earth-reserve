@@ -1,6 +1,6 @@
 __includes ["ERAv3core.nls"]
 
-extensions [ table ]
+extensions [ table time ]
 
 breed [ ops-nodes ops-node ]
 breed [ proj-investors proj-investor ]
@@ -9,6 +9,7 @@ globals [
   CENTRALIZED-OPS-NODES
   DECENTRALIZED-OPS-NODES
   NODE-MIN-PROJECT-SIZE
+  TIME-NOW
 ]
 
 patches-own [
@@ -26,6 +27,7 @@ proj-investors-own [
   ability              ;; just a number
   completed-projects   ;; just a number
   deposit-receipts     ;; can be a table too later
+  drs-redeemed-after-market  ;; temporary tracker
 ]
 
 ops-nodes-own [
@@ -38,6 +40,7 @@ to setup
   setup-ops-nodes
   setup-proj-investors
   setup-patches
+  set TIME-NOW time:anchor-to-ticks (time:create "2000-01-01") 1 "month"
   reset-ticks
 end
 
@@ -75,7 +78,7 @@ to setup-proj-investors
     set size 2
     setxy random-xcor random-ycor
     set home-jurisdiction [node-jurisdiction] of min-one-of CENTRALIZED-OPS-NODES [distance myself]
-    set cash round random-normal 10000 1000
+    set cash round random-normal 500 100
     set ability round random-normal 0.7 0.25
     if ability > 1 [set ability 1]
     if ability < 0.1 [set ability 0.1]
@@ -88,7 +91,7 @@ end
 to setup-patches
   ask patches [
     set ecological-health (1 + random 100)
-    set pcolor scale-color ([color] of min-one-of CENTRALIZED-OPS-NODES [distance myself]) ecological-health -200 300
+    set pcolor scale-color ([color] of min-one-of CENTRALIZED-OPS-NODES [distance myself]) ecological-health -200 200
     set jurisdiction [node-jurisdiction] of min-one-of CENTRALIZED-OPS-NODES [distance myself]
     set proj-here? false
   ]
@@ -98,7 +101,7 @@ end
 ;; range of projects instead of one project with fixed benefit
 
 to go
-  if (ticks > 0 and ticks mod 20 = 0) [
+  if (ticks > 0 and ticks mod 10 = 0) [
     core.eco-degradation
   ]
 
@@ -117,9 +120,18 @@ to go
 
   ask proj-investors [
     core.update-project-info
+    core.update-deposit-receipts
   ]
 
   tick
+end
+
+to-report number-deposit-receipts-in-market
+  let number 0
+  foreach deposit-receipts [ dr ->
+    set number number + 1
+  ]
+  report number
 end
 
 ;; consider legal stuff - in some places only certain currencies are allowed
@@ -214,7 +226,7 @@ num-proj-investors
 num-proj-investors
 0
 50
-30.0
+37.0
 1
 1
 NIL
@@ -295,17 +307,17 @@ c2
 c2
 0
 100
-54.0
+10.0
 1
 1
 NIL
 HORIZONTAL
 
 PLOT
-18
-538
-270
-685
+789
+17
+1041
+155
 distribution of health of patches
 NIL
 NIL
@@ -318,6 +330,39 @@ false
 "" "if min [ecological-health] of patches < max [ecological-health] of patches[\nset-plot-x-range min [ecological-health] of patches max [ecological-health] of patches]"
 PENS
 "default" 1.0 1 -16777216 true "" "histogram [ecological-health] of patches"
+
+SLIDER
+13
+171
+165
+204
+tax-rate
+tax-rate
+0
+0.05
+0.0058
+0.0001
+1
+NIL
+HORIZONTAL
+
+PLOT
+789
+168
+1044
+318
+num deposit receipts in market
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot sum [number-deposit-receipts-in-market] of proj-investors"
 
 @#$#@#$#@
 ## WHAT IS IT?
