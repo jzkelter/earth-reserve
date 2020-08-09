@@ -1,4 +1,4 @@
-;; observer run this procedure for background ecological degradation
+;; observer runs this procedure for background ecological degradation
 to core.eco-degradation
   ask patches with [ecological-health > 1][ 
     set ecological-health (ecological-health * (1 - eco-degrade-rate jurisdiction))
@@ -105,8 +105,6 @@ to-report calculate-estimated-cost [old-eco-health new-eco-health proj-investor-
 end 
 
 ;; for estimated cost: to consider if firms go out of business, should be calculated at the end
-;; pay upfront or in installments?
-;; make notes in flowchart (for things to add later)
 
 to-report calculate-estimated-profit [old-eco-health new-eco-health proj-investor-ability]
   report calculate-estimated-aiv old-eco-health new-eco-health - calculate-estimated-cost old-eco-health new-eco-health proj-investor-ability
@@ -128,13 +126,12 @@ to-report calculate-expost-aiv-no-anomalies [old-eco-health new-eco-health]
   let diff-in-rent (calculate-rent new-eco-health - calculate-rent old-eco-health)
   report precision random-normal diff-in-rent (diff-in-rent / 7) 2 ;; variance is smaller here because of less variation overall compared to estimation
 end 
-;; var should be the same, depends when the model is taking place
+;; variance maybe should be the same, depends when the model is taking place
 
 ;; project investors run this procedure to set a minimum aiv they are willing to tolerate
 ;; to be used in their decision making during proposal to the node later
 to core.select-min-redemption-price
   let cost table:get potential-project "project-cost"
-  ;; where the COST stuff comes in, same as selecting price there
   let min-return 1.1
   let min-redemption-price cost * min-return
   table:put potential-project "min-redemption-price" min-redemption-price
@@ -281,6 +278,7 @@ to core.update-patch-stats [project]
   ]
 end
 
+;; project investors run this to check if the deposit receipt is worth holding on to
 to-report worth-hold-on? [proj-investor-estimated-aiv node-estimated-aiv]
   let cost-of-carry (tax-rate * proj-investor-estimated-aiv) * 75 ;; assuming they pay taxes annually and holds it to term
   ifelse (proj-investor-estimated-aiv - cost-of-carry) > node-estimated-aiv [
@@ -290,6 +288,8 @@ to-report worth-hold-on? [proj-investor-estimated-aiv node-estimated-aiv]
   ]
 end
 
+;; project investors run this procedure to update each of the deposit receipts they're holding
+;; and do their annual reassessment of value
 to core.update-deposit-receipts
   foreach deposit-receipts [ dr ->
     let carry-start-date table:get dr "carry-start-date"
@@ -299,15 +299,17 @@ to core.update-deposit-receipts
     let expost-aiv-no-anomalies table:get dr "expost-aiv-no-anomalies"
     
     (ifelse time:difference-between TIME-NOW carry-end-date "day" = 0 [
-        redeem-deposit-receipt dr expost-aiv-no-anomalies
+        core.redeem-deposit-receipt dr expost-aiv-no-anomalies
       ] time-held > 1 and time-held mod 12 = 0 [
-        reassess-aiv-value dr
+        core.reassess-aiv-value dr
       ]
     )
   ]
 end
 
-to reassess-aiv-value [deposit-receipt]
+;; project investors run this procedure to reassess the worth of the deposit receipts they have
+;; and decide if their most profitable action would be redeeming it prematurely
+to core.reassess-aiv-value [deposit-receipt]
   let years-passed (table:get deposit-receipt "time-held") / 12
   let project-investor-per-year-estimate table:get deposit-receipt "project-investor-estimated-aiv-per-year"
   let node-per-year-estimate table:get deposit-receipt "node-estimated-aiv-per-year"
@@ -323,20 +325,21 @@ to reassess-aiv-value [deposit-receipt]
   table:put deposit-receipt "current-project-investor-estimated-aiv" current-project-investor-aiv-estimate
   table:put deposit-receipt "current-node-estimated-aiv" current-node-aiv-estimate
   
-  let cost-of-carry (tax-rate * current-project-investor-aiv-estimate) * (75 - years-passed)
   let current-market-price table:get deposit-receipt "current-market-price"
+  let cost-of-carry (tax-rate * current-market-price) * (75 - years-passed)
   
   (ifelse current-node-aiv-estimate >= current-market-price [ ;; market price is proj investor's first (probably higher) estimate
-      redeem-deposit-receipt deposit-receipt current-market-price
+      core.redeem-deposit-receipt deposit-receipt current-node-aiv-estimate
     ] current-node-aiv-estimate >= current-project-investor-aiv-estimate [
-      redeem-deposit-receipt deposit-receipt current-node-aiv-estimate
+      core.redeem-deposit-receipt deposit-receipt current-node-aiv-estimate
     ] (current-project-investor-aiv-estimate - cost-of-carry) <= current-node-aiv-estimate [
-      redeem-deposit-receipt deposit-receipt current-node-aiv-estimate
+      core.redeem-deposit-receipt deposit-receipt current-node-aiv-estimate
     ]
   )
 end
 
-to redeem-deposit-receipt [deposit-receipt redemption-price]
+;; project investors run this procedure to redeem a particular deposit receipt they're holding
+to core.redeem-deposit-receipt [deposit-receipt redemption-price]
   set cash (cash + redemption-price)
   set deposit-receipts remove deposit-receipt deposit-receipts
   set drs-redeemed-after-market drs-redeemed-after-market + 1
