@@ -28,6 +28,7 @@ proj-investors-own [
   completed-projects   ;; just a number
   deposit-receipts     ;; can be a table too later
   drs-redeemed-after-market  ;; temporary tracker
+  taxes-paid                 ;; temporary tracker
 ]
 
 ops-nodes-own [
@@ -168,9 +169,9 @@ ticks
 
 BUTTON
 14
-19
+17
 80
-52
+50
 NIL
 setup
 NIL
@@ -185,9 +186,9 @@ NIL
 
 BUTTON
 96
-19
+17
 177
-52
+50
 go once
 go
 NIL
@@ -201,10 +202,10 @@ NIL
 1
 
 BUTTON
-56
-61
-119
-94
+191
+17
+254
+50
 NIL
 go
 T
@@ -219,9 +220,9 @@ NIL
 
 SLIDER
 12
-104
+81
 164
-137
+114
 num-proj-investors
 num-proj-investors
 0
@@ -233,10 +234,10 @@ NIL
 HORIZONTAL
 
 PLOT
-17
-245
-269
-374
+16
+180
+268
+309
 num projects completed by an investor
 NIL
 NIL
@@ -251,10 +252,10 @@ PENS
 "default" 1.0 1 -16777216 true "" "histogram [completed-projects] of proj-investors\n"
 
 PLOT
-17
-381
-270
-531
+16
+316
+269
+460
 num projects completed on a patch
 NIL
 NIL
@@ -269,10 +270,10 @@ PENS
 "default" 1.0 1 -16777216 true "" "histogram [proj-counter] of patches"
 
 SLIDER
-178
-103
-316
-136
+179
+63
+317
+96
 c0
 c0
 0
@@ -284,10 +285,10 @@ NIL
 HORIZONTAL
 
 SLIDER
-178
-147
-315
-180
+179
+100
+316
+133
 c1
 c1
 0
@@ -299,10 +300,10 @@ NIL
 HORIZONTAL
 
 SLIDER
-178
-193
-315
-226
+179
+138
+316
+171
 c2
 c2
 0
@@ -332,10 +333,10 @@ PENS
 "default" 1.0 1 -16777216 true "" "histogram [ecological-health] of patches"
 
 SLIDER
-13
-171
-165
-204
+12
+117
+164
+150
 tax-rate
 tax-rate
 0
