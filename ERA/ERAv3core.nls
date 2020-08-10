@@ -82,7 +82,7 @@ to-report core.best-deal-near-me
     table:put potential-project-table "project-location" potential-project-patch
     table:put potential-project-table "current-eco-health" [ecological-health] of potential-project-patch
     table:put potential-project-table "project-investor-estimated-aiv" potential-project-rent-improvement
-    table:put potential-project-table "project-cost" potential-project-cost
+    table:put potential-project-table "project-cost" precision potential-project-cost 2
     table:put potential-project-table "project-timeframe" round ((potential-project-rent-improvement) / 10 * 12 + 1) ;; in "months" for now
     table:put potential-project-table "project-completion-date" time:plus TIME-NOW round ((potential-project-rent-improvement) / 10 * 12 + 1) "months"
     table:put potential-project-table "goal-eco-health" potential-project-goal-eco-health
@@ -289,7 +289,7 @@ to-report worth-hold-on? [proj-investor-estimated-aiv node-estimated-aiv]
 end
 
 ;; project investors run this procedure to update each of the deposit receipts they're holding
-;; and do their annual reassessment of value
+;; and do their annual reassessment of value and pay annual taxes
 to core.update-deposit-receipts
   foreach deposit-receipts [ dr ->
     let carry-start-date table:get dr "carry-start-date"
@@ -301,6 +301,7 @@ to core.update-deposit-receipts
     (ifelse time:difference-between TIME-NOW carry-end-date "day" = 0 [
         core.redeem-deposit-receipt dr expost-aiv-no-anomalies
       ] time-held > 1 and time-held mod 12 = 0 [
+        core.pay-deposit-receipt-tax dr
         core.reassess-aiv-value dr
       ]
     )
@@ -342,5 +343,13 @@ end
 to core.redeem-deposit-receipt [deposit-receipt redemption-price]
   set cash (cash + redemption-price)
   set deposit-receipts remove deposit-receipt deposit-receipts
-  set drs-redeemed-after-market drs-redeemed-after-market + 1
+  set drs-redeemed-after-market drs-redeemed-after-market + 1 ;; temporary tracker
+end
+
+;; project investors run this procedure to pay taxes on a deposit receipt
+to core.pay-deposit-receipt-tax [deposit-receipt]
+  let current-market-price table:get deposit-receipt "current-market-price"
+  let annual-tax (current-market-price * tax-rate)
+  set cash (cash - annual-tax)
+  set taxes-paid (taxes-paid + annual-tax) ;; temporary tracker
 end
