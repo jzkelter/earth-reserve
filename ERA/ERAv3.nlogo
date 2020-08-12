@@ -1,56 +1,76 @@
-extensions [ table ]
+__includes ["ERAv3core.nls"]
 
-globals [ eri-currencies ]
+extensions [ table time ]
 
 breed [ ops-nodes ops-node ]
 breed [ proj-investors proj-investor ]
 
+globals [
+  CENTRALIZED-OPS-NODES
+  DECENTRALIZED-OPS-NODES
+  NODE-MIN-PROJECT-SIZE
+  TIME-NOW
+]
+
 patches-own [
-  country
-  environment-health
-  cost-of-proj ;; will be in own currency?, so outsiders will have to convert with ERI
-  timeframe-of-proj
-  env-benefit-from-proj
-  proj-counter
+  jurisdiction
+  ecological-health    ;; combined metric of topsoil depth and topsoil quality
+  proj-counter         ;; just a number
   proj-here?
 ]
 
 proj-investors-own [
-  home-country
+  home-jurisdiction
   cash
-  current-projects
-  ability
-  new-project? ;; if investor got new project in this tick
-  completed-projects ;; to factor into ability
+  potential-project    ;; a table that starts out empty every tick
+  current-projects     ;; a list of tables
+  ability              ;; just a number
+  completed-projects   ;; just a number
+  deposit-receipts     ;; can be a table too later
+  drs-redeemed-after-market  ;; temporary tracker
+  taxes-paid                 ;; temporary tracker
 ]
 
+ops-nodes-own [
+  node-jurisdiction
+  proj-investors-with-new-projects-for-me  ;; a new list of turtles every tick
+]
 
 to setup
   clear-all
-  set eri-currencies (list)
   setup-ops-nodes
   setup-proj-investors
   setup-patches
-  create-ops-nodes 1 [   ;; this is standing in for the decentralized ops-node (like a crypto)
-    set color white
-    set shape "Circle (2)"
-    set size 2
-    setxy random-xcor random-ycor
-  ]
+  set TIME-NOW time:anchor-to-ticks (time:create "2000-01-01") 1 "month"
   reset-ticks
 end
 
 to setup-ops-nodes
-  foreach n-of 3 base-colors [ c ->   ;; 3 is placeholder for number of countries
+  foreach n-of 3 base-colors [ c ->   ;; 3 is placeholder for number of jurisdictions
     ask one-of patches [
       sprout-ops-nodes 1 [
         set color c
         set shape "Circle (2)"
         set size 2
+        set node-jurisdiction [who] of self
       ]
     ]
   ]
+  create-ops-nodes 1 [  ;; this is standing in for the decentralized ops-node (like cryptos)
+    set color white
+    set shape "Circle (2)"
+    set size 2
+    setxy random-xcor random-ycor
+    set node-jurisdiction "decentralized"
+  ]
+  ask ops-nodes [
+    set proj-investors-with-new-projects-for-me (list)
+  ]
+  set CENTRALIZED-OPS-NODES ops-nodes with [node-jurisdiction != "decentralized"]
+  set DECENTRALIZED-OPS-NODES ops-nodes with [node-jurisdiction = "decentralized"]
+  set NODE-MIN-PROJECT-SIZE 10 ;; arbitrary for now, can be slider or hooked to something later
 end
+
 
 to setup-proj-investors
   create-proj-investors num-proj-investors [
@@ -58,238 +78,72 @@ to setup-proj-investors
     set color black + 2
     set size 2
     setxy random-xcor random-ycor
-    set home-country [who] of min-one-of ops-nodes [distance myself]
-    set cash round random-normal 10000 1000
-    set ability round random-normal 60 25
-    if ability > 100 [set ability 100]
-    if ability < 1 [set ability 1]
+    set home-jurisdiction [node-jurisdiction] of min-one-of CENTRALIZED-OPS-NODES [distance myself]
+    set cash round random-normal 500 100
+    set ability round random-normal 0.7 0.25
+    if ability > 1 [set ability 1]
+    if ability < 0.1 [set ability 0.1]
+    set potential-project (list)
     set current-projects (list)
-    set new-project? false
+    set deposit-receipts (list)
   ]
 end
 
 to setup-patches
   ask patches [
-    set environment-health (1 + random 100)
-    set pcolor ([color] of min-one-of ops-nodes [distance myself] + (sqrt environment-health) / 3)
-    set country [who] of min-one-of ops-nodes [distance myself]
-    set proj-counter 0
-    set cost-of-proj round random-normal 3000 300
-    set timeframe-of-proj (1 + random 5)
-    set env-benefit-from-proj round (- ln(environment-health) + round (cost-of-proj / 1000 + timeframe-of-proj) + 1)
+    set ecological-health (1 + random 100)
+    set pcolor scale-color ([color] of min-one-of CENTRALIZED-OPS-NODES [distance myself]) ecological-health -200 200
+    set jurisdiction [node-jurisdiction] of min-one-of CENTRALIZED-OPS-NODES [distance myself]
     set proj-here? false
   ]
 end
 
+;; climate characteristics of patch (for later)
+;; range of projects instead of one project with fixed benefit
 
 to go
-  ;; environment degradation over time
-  if (ticks > 0 and ticks mod 20 = 0) [
-    ask patches with [environment-health > 1][ ;; something that asymptotes, use a function instead of linear
-      set environment-health (environment-health - 1)
-      set pcolor ([color] of one-of ops-nodes with [who = [country] of myself] + (sqrt environment-health) / 3)
-    ]
-    ask patches with [proj-here? = false] [
-      set env-benefit-from-proj round (- ln(environment-health) + round (cost-of-proj / 1000 + timeframe-of-proj) + 1)
-    ]
+  if (ticks > 0 and ticks mod 10 = 0) [
+    core.eco-degradation
   ]
 
   ask proj-investors [
-    update-proj-time
-    set new-project? false
-    select-proj-location
-    if new-project? = true [
-      select-redemption-price
-      choose-ops-node
+    core.update-or-complete-project
+    core.look-for-new-project
+    if potential-project != nobody [
+      core.select-min-redemption-price ;; maybe should be min node AIV tolerated?
+      core.choose-ops-node
     ]
   ]
+
   ask ops-nodes [
-    review-proposals
+    core.review-proposals
   ]
+
   ask proj-investors [
-    update-proj-info
+    core.update-project-info
+    core.update-deposit-receipts
   ]
 
   tick
 end
 
-
-to select-proj-location
-  if cash >= 100 [
-    let potential-project best-deal-near-me ([ability] of self)
-    ifelse potential-project != nobody [
-      let new-project table:make
-      table:put new-project "project-location" potential-project
-      table:put new-project "project-cost" [cost-of-proj] of potential-project
-      table:put new-project "project-timeframe" [timeframe-of-proj] of potential-project
-      table:put new-project "project-env-benefit" [env-benefit-from-proj] of potential-project
-
-      set current-projects fput new-project current-projects
-      move-to table:get new-project "project-location"
-      set new-project? true
-      ask table:get new-project "project-location" [
-        set proj-here? true
-      ]
-    ][
-      set heading random 360 ;; systematic search at some point
-      fd (10 + random 10)
-    ]
+to-report number-deposit-receipts-in-market
+  let number 0
+  foreach deposit-receipts [ dr ->
+    set number number + 1
   ]
-
+  report number
 end
 
-to select-redemption-price
-  let cost table:get item 0 current-projects "project-cost"
-  let time table:get item 0 current-projects "project-timeframe"
-  let redemption-price round ((sqrt (time + 0.1)) * cost) ;; where the COST stuff comes in, same as selecting price there
-  table:put item 0 current-projects "proposed-redemption-price" redemption-price
-end
-
-;; legal stuff - in some places only certain currencies are allowed
-to choose-ops-node
-  ifelse random 100 < 80 [ ;; instead of random for later, include prediction of relative worth of currencies
-    let proj-ops-node one-of ops-nodes with [who = [home-country] of myself]
-    table:put item 0 current-projects "relevant-ops-node" proj-ops-node
-  ][
-    let proj-ops-node one-of ops-nodes with [who > count proj-investors]
-    table:put item 0 current-projects "relevant-ops-node" proj-ops-node
-  ]
-end
-
-
-to-report best-deal-near-me [proj-investor-ability]
-  let available-projects patches in-radius 7 with [proj-here? = false and cost-of-proj < [cash] of myself and environment-health < 100]
-  let benefit (env-benefit-from-proj * 10) * proj-investor-ability ;; set scale so no arbitrary multiplicative factors
-  let cost round (cost-of-proj / 10 + (timeframe-of-proj) ^ 2) ;; set benefit similar scale to cost
-  let potential-project max-one-of available-projects [benefit - cost] ;; reports a patch
-
-  if potential-project != nobody [
-  ifelse [benefit - cost] of potential-project > 0.01 * ([cash] of self) [ ;; 0.01 is arbitrary - saying want a min return of 1% of their wealth
-    report potential-project
-  ] [
-    report nobody
-    ]
-  ]
-  report nobody
-end
-
-to review-proposals
-  let agents-with-new-proposals-for-me proj-investors with [new-project? = true and table:get item 0 current-projects "relevant-ops-node" = myself]
-
-  ask agents-with-new-proposals-for-me [
-    let proposed-redemption-price table:get item 0 current-projects "proposed-redemption-price"
-    let cost table:get item 0 current-projects "project-cost"
-    let env-benefit table:get item 0 current-projects "project-env-benefit"
-    let time table:get item 0 current-projects "project-timeframe"
-    let current-environment-health [environment-health] of table:get item 0 current-projects "project-location"
-    node-accept-or-reject env-benefit time current-environment-health
-    table:put item 0 current-projects "do-project?" false
-
-    if table:get item 0 current-projects "proposal-result" = "accept" [
-
-      ifelse random 100 < 70 [ ;; node agrees to proposed redemption price -- fine for random now, put in reporter for whether or not the node agrees (can change into non random for later)
-        accept-project proposed-redemption-price
-      ][ ;; else node suggests higher or lower price
-        let node-redemption-price round random-normal (proposed-redemption-price) (proposed-redemption-price / 4)
-        ifelse node-redemption-price >= proposed-redemption-price [ ;; agent automatically accepts if new price is higher
-          accept-project node-redemption-price
-        ][ ;; else if new price is lower, agent accepts/rejects with randomness
-          if node-redemption-price > cost and random 100 < 70 [ ;; if these conditions are fulfilled the agent still accepts (shouldn't be random_
-            accept-project node-redemption-price ;; privately proj investors have minimum price (if less than that then bye)
-          ] ;; no need to write an else condition because the default do-project? is false
-        ]
-      ]
-    ]
-  ]
-end
-
-
-to node-accept-or-reject [env-benefit time current-environment-health]
-  (ifelse current-environment-health <= 10 [
-      table:put item 0 current-projects "proposal-result" "accept"
-    ] env-benefit / time < 1 [
-      table:put item 0 current-projects "proposal-result" "reject"
-    ] random 100 < 5 [
-      table:put item 0 current-projects "proposal-result" "reject"
-    ][ ;; else
-      table:put item 0 current-projects "proposal-result" "accept"
-    ]
-  )
-end
-
-to accept-project [redemption-price]
-  table:put item 0 current-projects "final-redemption-price" redemption-price
-  table:put item 0 current-projects "do-project?" true
-end
-
-to update-proj-info
-    if new-project? = true and table:get item 0 current-projects "do-project?" = false [
-      ;; ask patches to set proj-here false if proposal was not accepted
-      ask table:get item 0 current-projects "project-location" [
-        set proj-here? false
-      ]
-      set new-project? false
-      ;; wipe the project data from current-projects
-      set current-projects remove-item 0 current-projects
-    ]
-    if new-project? = true and table:get item 0 current-projects "do-project?" = true [
-      set cash (cash - table:get item 0 current-projects "project-cost")
-      table:put item 0 current-projects "project-time-elapsed" 0
-    ]
-end
-
-to update-proj-time
-;  if not empty? current-projects [ ;; no need this bc foreach
-    foreach n-values length current-projects [i -> i] [ n ->
-      let time-now table:get item n current-projects "project-time-elapsed"
-      set time-now (time-now + 1)
-      table:put item n current-projects "project-time-elapsed" time-now ;; can also be a reporter to get diff in time
-    ]
-
-    let to-delete (list)
-
-    foreach n-values length current-projects [i -> i] [ n ->
-      if table:get item n current-projects "project-time-elapsed" = table:get item n current-projects "project-timeframe" [
-        set completed-projects (completed-projects + 1)
-        set to-delete fput n to-delete
-      ] ;; discrete event simulator
-    ]
-    foreach to-delete [ n ->
-      update-stats n
-      set current-projects remove-item n current-projects
-    ]
-;  ]
-end
-
-to update-stats [project]
-  ;; update proj-investor cash
-  let old-redemption-price table:get item project current-projects "final-redemption-price"
-  ifelse random 100 < 85 [
-    set cash (cash + old-redemption-price)
-  ][
-    let new-redemption-price round random-normal old-redemption-price old-redemption-price / 6
-  ]
-  ;; update ability
-  if ability < 100 [
-    set ability (ability + 1)]
-  ;; update project status
-  let finished-project-location table:get item project current-projects "project-location"
-  let finished-project-env-benefit table:get item project current-projects "project-env-benefit"
-  ask finished-project-location [
-    set environment-health (environment-health + finished-project-env-benefit)
-    set proj-counter (proj-counter + 1)
-    set proj-here? false
-  ]
-end
-
+;; consider legal stuff - in some places only certain currencies are allowed
 
 ;; risk assessment (cost of project would be distribution, some projects will have more risk)
 ;; point assessment ok for first
 @#$#@#$#@
 GRAPHICS-WINDOW
-210
+329
 10
-647
+766
 448
 -1
 -1
@@ -315,9 +169,9 @@ ticks
 
 BUTTON
 14
-19
+17
 80
-52
+50
 NIL
 setup
 NIL
@@ -332,9 +186,9 @@ NIL
 
 BUTTON
 96
-19
+17
 177
-52
+50
 go once
 go
 NIL
@@ -348,10 +202,10 @@ NIL
 1
 
 BUTTON
-56
-85
-119
-118
+191
+17
+254
+50
 NIL
 go
 T
@@ -365,19 +219,151 @@ NIL
 1
 
 SLIDER
-15
-138
-193
-171
+12
+81
+164
+114
 num-proj-investors
 num-proj-investors
 0
 50
+37.0
+1
+1
+NIL
+HORIZONTAL
+
+PLOT
+16
+180
+268
+309
+num projects completed by an investor
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" "if  min [completed-projects] of proj-investors < max [completed-projects] of proj-investors[\nset-plot-x-range min [completed-projects] of proj-investors max [completed-projects] of proj-investors]"
+PENS
+"default" 1.0 1 -16777216 true "" "histogram [completed-projects] of proj-investors\n"
+
+PLOT
+16
+316
+269
+460
+num projects completed on a patch
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" "if min [proj-counter] of patches < max [proj-counter] of patches[\nset-plot-x-range min [proj-counter] of patches max [proj-counter] of patches]"
+PENS
+"default" 1.0 1 -16777216 true "" "histogram [proj-counter] of patches"
+
+SLIDER
+179
+63
+317
+96
+c0
+c0
+0
+100
 15.0
 1
 1
 NIL
 HORIZONTAL
+
+SLIDER
+179
+100
+316
+133
+c1
+c1
+0
+500
+500.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+179
+138
+316
+171
+c2
+c2
+0
+100
+10.0
+1
+1
+NIL
+HORIZONTAL
+
+PLOT
+789
+17
+1041
+155
+distribution of health of patches
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" "if min [ecological-health] of patches < max [ecological-health] of patches[\nset-plot-x-range min [ecological-health] of patches max [ecological-health] of patches]"
+PENS
+"default" 1.0 1 -16777216 true "" "histogram [ecological-health] of patches"
+
+SLIDER
+12
+117
+164
+150
+tax-rate
+tax-rate
+0
+0.05
+0.0058
+0.0001
+1
+NIL
+HORIZONTAL
+
+PLOT
+789
+168
+1044
+318
+num deposit receipts in market
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot sum [number-deposit-receipts-in-market] of proj-investors"
 
 @#$#@#$#@
 ## WHAT IS IT?
