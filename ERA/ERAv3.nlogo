@@ -14,9 +14,10 @@ globals [
 
 patches-own [
   jurisdiction
-  ecological-health    ;; combined metric of topsoil depth and topsoil quality
-  proj-counter         ;; just a number
+  soil-health    ;; combined metric of topsoil depth and topsoil quality
+  proj-counter
   proj-here?
+  base-color     ;; based on nearest centralized operations node
 ]
 
 proj-investors-own [
@@ -24,16 +25,14 @@ proj-investors-own [
   cash
   potential-project    ;; a table that starts out empty every tick
   current-projects     ;; a list of tables
-  ability              ;; just a number
+  ability              ;; number that represents project investors ability, range 0.1 to 1
   completed-projects   ;; just a number
-  deposit-receipts     ;; can be a table too later
-  drs-redeemed-after-market  ;; temporary tracker
-  taxes-paid                 ;; temporary tracker
+  deposit-receipts     ;; a list of tables
 ]
 
 ops-nodes-own [
   node-jurisdiction
-  proj-investors-with-new-projects-for-me  ;; a new list of turtles every tick
+  PIs-with-new-projects-for-me  ;; a new list of turtles every tick
 ]
 
 to setup
@@ -64,7 +63,7 @@ to setup-ops-nodes
     set node-jurisdiction "decentralized"
   ]
   ask ops-nodes [
-    set proj-investors-with-new-projects-for-me (list)
+    set PIs-with-new-projects-for-me (list)
   ]
   set CENTRALIZED-OPS-NODES ops-nodes with [node-jurisdiction != "decentralized"]
   set DECENTRALIZED-OPS-NODES ops-nodes with [node-jurisdiction = "decentralized"]
@@ -79,8 +78,8 @@ to setup-proj-investors
     set size 2
     setxy random-xcor random-ycor
     set home-jurisdiction [node-jurisdiction] of min-one-of CENTRALIZED-OPS-NODES [distance myself]
-    set cash round random-normal 500 100
-    set ability round random-normal 0.7 0.25
+    set cash round random-normal 100 25
+    set ability precision (random-normal 0.7 0.25) 2
     if ability > 1 [set ability 1]
     if ability < 0.1 [set ability 0.1]
     set potential-project (list)
@@ -91,28 +90,24 @@ end
 
 to setup-patches
   ask patches [
-    set ecological-health (1 + random 100)
-    set pcolor scale-color ([color] of min-one-of CENTRALIZED-OPS-NODES [distance myself]) ecological-health -200 200
+    set soil-health (1 + random 100)
     set jurisdiction [node-jurisdiction] of min-one-of CENTRALIZED-OPS-NODES [distance myself]
+    set base-color [color] of one-of CENTRALIZED-OPS-NODES with [who = [jurisdiction] of myself]
+    set pcolor scale-color base-color soil-health -200 200
     set proj-here? false
   ]
 end
 
 ;; climate characteristics of patch (for later)
-;; range of projects instead of one project with fixed benefit
 
 to go
   if (ticks > 0 and ticks mod 10 = 0) [
-    core.eco-degradation
+    core.soil-degradation
   ]
 
   ask proj-investors [
     core.update-or-complete-project
     core.look-for-new-project
-    if potential-project != nobody [
-      core.select-min-redemption-price ;; maybe should be min node AIV tolerated?
-      core.choose-ops-node
-    ]
   ]
 
   ask ops-nodes [
@@ -128,17 +123,8 @@ to go
 end
 
 to-report number-deposit-receipts-in-market
-  let number 0
-  foreach deposit-receipts [ dr ->
-    set number number + 1
-  ]
-  report number
+  report sum [length deposit-receipts] of proj-investors
 end
-
-;; consider legal stuff - in some places only certain currencies are allowed
-
-;; risk assessment (cost of project would be distribution, some projects will have more risk)
-;; point assessment ok for first
 @#$#@#$#@
 GRAPHICS-WINDOW
 329
@@ -291,8 +277,8 @@ SLIDER
 133
 c1
 c1
-0
-500
+300
+700
 500.0
 1
 1
@@ -328,9 +314,9 @@ NIL
 10.0
 true
 false
-"" "if min [ecological-health] of patches < max [ecological-health] of patches[\nset-plot-x-range min [ecological-health] of patches max [ecological-health] of patches]"
+"" "if min [soil-health] of patches < max [soil-health] of patches[\nset-plot-x-range min [soil-health] of patches max [soil-health] of patches]"
 PENS
-"default" 1.0 1 -16777216 true "" "histogram [ecological-health] of patches"
+"default" 1.0 1 -16777216 true "" "histogram [soil-health] of patches"
 
 SLIDER
 12
@@ -363,7 +349,25 @@ true
 false
 "" ""
 PENS
-"default" 1.0 0 -16777216 true "" "plot sum [number-deposit-receipts-in-market] of proj-investors"
+"default" 1.0 0 -16777216 true "" "plot number-deposit-receipts-in-market"
+
+PLOT
+789
+329
+1046
+479
+average eco health over time
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot mean [soil-health] of patches"
 
 @#$#@#$#@
 ## WHAT IS IT?

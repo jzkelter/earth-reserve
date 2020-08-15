@@ -1,18 +1,21 @@
-;; observer runs this procedure for background ecological degradation
-to core.eco-degradation
-  ask patches with [ecological-health > 1][ 
-    set ecological-health (ecological-health * (1 - eco-degrade-rate jurisdiction))
-    set pcolor scale-color ([color] of one-of CENTRALIZED-OPS-NODES with [node-jurisdiction = [jurisdiction] of myself]) ecological-health -200 200
+;; observer runs this procedure for background soil degradation
+to core.soil-degradation
+  ask patches with [soil-health > 1][ 
+    set soil-health (soil-health * (1 - soil-degrade-rate jurisdiction))
+    set pcolor scale-color base-color soil-health -200 200
     ]
 end
 
 ;; this will eventually be "hard-coded"/taking input from dataset based on eco-agro zones
-to-report eco-degrade-rate [jurisdiction-input]
-  (ifelse jurisdiction-input = 0 [
+to-report soil-degrade-rate [jurisdiction-input]
+  (ifelse 
+    jurisdiction-input = 0 [
       report 0.01
-    ] jurisdiction-input = 1 [
+    ] 
+    jurisdiction-input = 1 [
       report 0.02
-    ] jurisdiction-input = 2 [
+    ] 
+    jurisdiction-input = 2 [
       report 0.015
     ]
   )
@@ -21,14 +24,16 @@ end
 ;; project investors run this procedure to document the characteristics of the potential project (if there is one)
 ;; if there isn't one they move to a new place (randomly for now)
 to core.look-for-new-project
-  let bankruptcy-line 10
+  let bankruptcy-line 0
   if cash >= bankruptcy-line [
     set potential-project core.best-deal-near-me
-    ifelse potential-project != nobody [     
+    ifelse potential-project != nobody [    
       move-to table:get potential-project "project-location"
-      ask table:get potential-project "project-location" [
+      ask patch-here [
         set proj-here? true
       ]
+      core.select-min-redemption-price ;; synonymous with min node AIV tolerated
+      core.choose-ops-node
     ][
       set heading random 360 ;; change to more systematic search at some point
       fd (10 + random 10)
@@ -38,95 +43,100 @@ end
 
 ;; project investors try to find the best potential project from a subset of project locations
 to-report core.best-deal-near-me
-  let max-eco-health-for-proj 1000 ;; arbitrary for now, if health is greater than this number, the patch will not be considered for a project
   let potential-projects patches in-radius 7 with [proj-here? = false 
-                                                   and ecological-health < max-eco-health-for-proj
-                                                   and ecological-health < calculate-optimal-health [ability] of myself]
+                                                   and soil-health < calc-optimal-health [ability] of myself]
+  if potential-projects = nobody [
+    report nobody
+  ]
 
-  ;; now find the most profitable project based on new method (formulas)
-  let proj-investor-ability [ability] of self
-  let potential-project-patch max-one-of potential-projects [calculate-estimated-profit (ecological-health) (calculate-optimal-health [ability] of myself) (proj-investor-ability)]
-  
-  let potential-project-rent-improvement 0
-  let potential-project-cost 0
-  let potential-project-profit 0
-  let potential-project-goal-eco-health 0
-  let potential-project-expost-aiv 0
-  
-  if potential-project-patch != nobody [
-    set potential-project-rent-improvement calculate-estimated-aiv ([ecological-health] of potential-project-patch) (calculate-optimal-health [ability] of self)
-    set potential-project-cost calculate-estimated-cost ([ecological-health] of potential-project-patch) (calculate-optimal-health [ability] of self) (proj-investor-ability)
-    set potential-project-profit (potential-project-rent-improvement - potential-project-cost)
-    set potential-project-goal-eco-health calculate-optimal-health [ability] of self
-    set potential-project-expost-aiv calculate-expost-aiv-no-anomalies ([ecological-health] of potential-project-patch) (calculate-optimal-health [ability] of self)
+  let PI-ability [ability] of self
+  let best-estimated-profit-so-far 0
+  let best-potential-project-data (list)
+    
+  ask potential-projects [
+    let estimated-cost calc-estimated-cost self calc-optimal-health (PI-ability) PI-ability
+    
+    ;; if the project investor cannot afford raising the health all the way to optimal, they do the same project but just invest everything they have
+    if estimated-cost > [cash] of myself [
+      set estimated-cost [cash] of myself
+    ]
+
+    let soil-health-given-investment calc-new-soil-health-given-investment PI-ability estimated-cost [soil-health] of self
+    let estimated-aiv calc-estimated-aiv self soil-health-given-investment
+    let estimated-profit estimated-aiv - estimated-cost
+    
+    if estimated-profit > best-estimated-profit-so-far [
+      set best-estimated-profit-so-far estimated-profit
+      set best-potential-project-data (list (self)(estimated-aiv)(estimated-cost)(soil-health-given-investment))
+    ]
+  ]
+    
+  let potential-project-table table:make
+  table:put potential-project-table "PI-estimated-aiv" 0
+  let expected-roi 0
+    
+  if length best-potential-project-data != 0 [ ;; can be 0 if all profits of potential projects are negative
+    table:put potential-project-table "project-location" first best-potential-project-data
+    table:put potential-project-table "current-soil-health" [soil-health] of first best-potential-project-data
+    table:put potential-project-table "PI-estimated-aiv" item 1 best-potential-project-data
+    table:put potential-project-table "project-cost" item 2 best-potential-project-data
+    table:put potential-project-table "goal-soil-health" item 3 best-potential-project-data
+    table:put potential-project-table "expost-aiv-given-no-anomalies" calc-expost-aiv-no-anomalies (table:get potential-project-table "current-soil-health") (table:get potential-project-table "goal-soil-health")
+      
+    set expected-roi (table:get potential-project-table "PI-estimated-aiv" - table:get potential-project-table "project-cost") / table:get potential-project-table "project-cost"
   ]
   
-  ;; if the project investor cannot afford raising the health all the way to optimal, they do the same project but just invest everything they have
-  if potential-project-cost > [cash] of self [
-    set potential-project-cost [cash] of self
-    let new-eco-health-given-max-investment sqrt((2 * [ability] of self * c1 * potential-project-cost) - c2 ^ 2) - c2
-    set potential-project-rent-improvement calculate-estimated-aiv ([ecological-health] of potential-project-patch) new-eco-health-given-max-investment
-    set potential-project-profit (potential-project-rent-improvement - potential-project-cost)
-    set potential-project-goal-eco-health new-eco-health-given-max-investment
-    set potential-project-expost-aiv calculate-expost-aiv-no-anomalies ([ecological-health] of potential-project-patch) new-eco-health-given-max-investment
-  ]
+  let min-roi 1.1 ;; saying project investors want a 10% return on their investment based on their estimates
   
-  let min-return-wanted 0.1 ;; saying project investors want a 10% return on their investment based on their estimates
-  
-  ifelse potential-project-patch != nobody 
-  and potential-project-rent-improvement >= NODE-MIN-PROJECT-SIZE 
-  and potential-project-cost <= [cash] of self  ;; probably don't need this again, given check above
-  and potential-project-profit >= potential-project-cost * min-return-wanted [
-    
-    let potential-project-table table:make
-    table:put potential-project-table "project-location" potential-project-patch
-    table:put potential-project-table "current-eco-health" [ecological-health] of potential-project-patch
-    table:put potential-project-table "project-investor-estimated-aiv" potential-project-rent-improvement
-    table:put potential-project-table "project-cost" precision potential-project-cost 2
-    table:put potential-project-table "project-timeframe" round ((potential-project-rent-improvement) / 10 * 12 + 1) ;; in "months" for now
-    table:put potential-project-table "project-completion-date" time:plus TIME-NOW round ((potential-project-rent-improvement) / 10 * 12 + 1) "months"
-    table:put potential-project-table "goal-eco-health" potential-project-goal-eco-health
-    table:put potential-project-table "expost-aiv-given-no-anomalies" potential-project-expost-aiv
-    
+  ifelse table:get potential-project-table "PI-estimated-aiv" >= NODE-MIN-PROJECT-SIZE 
+  and expected-roi >= min-roi [
+    let proj-length-based-on-rent-improvement round ((table:get potential-project-table "PI-estimated-aiv") / 10 * 12 + 1) ;; in months, saying about 10 units of rent improvement per year
+      
+    table:put potential-project-table "project-timeframe" proj-length-based-on-rent-improvement
+    table:put potential-project-table "project-completion-date" time:plus TIME-NOW proj-length-based-on-rent-improvement "months"
+      ;; check if timeframe and completion date are both needed
+      ;; or just start date and completion date
+      ;; if timeframe is being used somewhere then leave it, if not replace w start date
     report potential-project-table
   ][
     report nobody
-  ]
+   ]
 end
 
-;; randomness here reflects uncertanties/different beliefs in estimation
-to-report calculate-estimated-aiv [old-eco-health new-eco-health]
-  let diff-in-rent (calculate-rent new-eco-health - calculate-rent old-eco-health)
-  report precision random-normal diff-in-rent (diff-in-rent / 5) 2
+to-report calc-estimated-aiv [proj-location new-soil-health]
+  let old-soil-health [soil-health] of proj-location
+  let diff-in-rent (calc-rent new-soil-health - calc-rent old-soil-health)
+  report precision random-normal diff-in-rent abs (diff-in-rent / 5) 2
 end
 
-to-report calculate-estimated-cost [old-eco-health new-eco-health proj-investor-ability]
-  report calculate-investment new-eco-health proj-investor-ability - calculate-investment old-eco-health proj-investor-ability
+to-report calc-estimated-cost [proj-location new-soil-health PI-ability]
+  let old-soil-health [soil-health] of proj-location
+  report precision (calc-investment new-soil-health PI-ability - calc-investment old-soil-health PI-ability) 2
 end 
 
 ;; for estimated cost: to consider if firms go out of business, should be calculated at the end
 
-to-report calculate-estimated-profit [old-eco-health new-eco-health proj-investor-ability]
-  report calculate-estimated-aiv old-eco-health new-eco-health - calculate-estimated-cost old-eco-health new-eco-health proj-investor-ability
+to-report calc-new-soil-health-given-investment [PI-ability proj-cost old-soil-health]
+  report sqrt((2 * PI-ability * c1 * proj-cost) + (old-soil-health ^ 2) + (2 * c2 * old-soil-health) + (c2 ^ 2)) - c2
 end
 
-to-report calculate-rent [eco-health]
-  report c0 * ln(eco-health)
+to-report calc-rent [soil-health-input]
+  report c0 * ln(soil-health-input)
 end
 
-to-report calculate-investment [eco-health proj-investor-ability] ;; investment needed to get from 0 health to (eco-health) level
-  report ((eco-health ^ 2) / (2 * proj-investor-ability * c1)) + ((c2 * eco-health) / (proj-investor-ability * c1))
+to-report calc-investment [soil-health-input PI-ability] ;; investment needed to get from 0 health to (soil-health-input) level
+  report ((soil-health-input ^ 2) / (2 * PI-ability * c1)) + ((c2 * soil-health-input) / (PI-ability * c1))
 end
 
-to-report calculate-optimal-health [proj-investor-ability]
-  report (- c2 + sqrt (c2 ^ 2 + (4 * proj-investor-ability * c0 * c1))) / 2
+to-report calc-optimal-health [PI-ability]
+  report (- c2 + sqrt (c2 ^ 2 + (4 * PI-ability * c0 * c1))) / 2
 end
 
-to-report calculate-expost-aiv-no-anomalies [old-eco-health new-eco-health]
-  let diff-in-rent (calculate-rent new-eco-health - calculate-rent old-eco-health)
-  report precision random-normal diff-in-rent (diff-in-rent / 7) 2 ;; variance is smaller here because of less variation overall compared to estimation
+to-report calc-expost-aiv-no-anomalies [old-soil-health new-soil-health]
+  let diff-in-rent (calc-rent new-soil-health - calc-rent old-soil-health)
+  report precision random-normal diff-in-rent (diff-in-rent / 5) 2 ;; variance may need to be smaller here because of less variation overall compared to estimation
 end 
-;; variance maybe should be the same, depends when the model is taking place
+
 
 ;; project investors run this procedure to set a minimum aiv they are willing to tolerate
 ;; to be used in their decision making during proposal to the node later
@@ -141,47 +151,48 @@ end
 ;; right now it's assumed the only possibilities are only that of their home country or a decentralized one
 to core.choose-ops-node
   let prob-choose-home-ops-node 80 ;; arbitrary for now
-  ifelse random 100 < prob-choose-home-ops-node [ ;; instead of random for later, include prediction of relative worth of currencies
-    let proj-ops-node one-of CENTRALIZED-OPS-NODES with [node-jurisdiction = [home-jurisdiction] of myself]
-    table:put potential-project "relevant-ops-node" proj-ops-node
-    ask proj-ops-node [
-      set proj-investors-with-new-projects-for-me fput myself proj-investors-with-new-projects-for-me
-    ]
+  
+  let proj-ops-node ifelse-value (random 100 < prob-choose-home-ops-node) [
+    one-of CENTRALIZED-OPS-NODES with [node-jurisdiction = [home-jurisdiction] of myself]
   ][
-    let proj-ops-node one-of DECENTRALIZED-OPS-NODES
-    table:put potential-project "relevant-ops-node" proj-ops-node
-    ask proj-ops-node [
-      set proj-investors-with-new-projects-for-me fput myself proj-investors-with-new-projects-for-me
-    ]
+    one-of DECENTRALIZED-OPS-NODES
   ]
+  
+  table:put potential-project "relevant-ops-node" proj-ops-node
+  ask proj-ops-node [
+    set PIs-with-new-projects-for-me fput myself PIs-with-new-projects-for-me
+  ]
+  
 end
 
 ;; operations nodes run this procedure to assess the proposal of project investors who come to them
 ;; within this procedure they estimate their own aiv of the proposed project
 to core.review-proposals
-  let relevant-project-investors turtle-set [proj-investors-with-new-projects-for-me] of self
-
-  ask relevant-project-investors [
-    table:put potential-project "do-project?" false
-    core.node-accept-or-reject potential-project
+  let relevant-PIs turtle-set [PIs-with-new-projects-for-me] of self
+  ask relevant-PIs [
+    if potential-project != nobody [
+      table:put potential-project "do-project?" false
+      core.node-accept-or-reject potential-project
+    ]
   ]
+  set PIs-with-new-projects-for-me (list) ;; if not keeping track, otherwise put in go procedure
 end
 
 ;; operations nodes run this procedure to make a decision on their proposal assessment
 to core.node-accept-or-reject [potential-project-table]
   let min-redemption-price table:get potential-project-table "min-redemption-price"
-  let proj-investor-estimated-aiv table:get potential-project-table "project-investor-estimated-aiv"
-  let node-estimated-aiv round (random-normal proj-investor-estimated-aiv (proj-investor-estimated-aiv / 3)) ;; assumes the estimation is more or less the same
+  let PI-estimated-aiv table:get potential-project-table "PI-estimated-aiv"
+  let node-estimated-aiv round (random-normal PI-estimated-aiv (PI-estimated-aiv / 3)) ;; assumes the estimation is more or less the same
  
-  ifelse node-estimated-aiv < NODE-MIN-PROJECT-SIZE [ ;; potential project was already filtered for it, but there's a chance the node estimation is lower
+  (ifelse 
+    node-estimated-aiv < NODE-MIN-PROJECT-SIZE [ ;; potential project was already filtered for it, but there's a chance the node estimation is lower
       table:put potential-project "proposal-result" "reject"
-    ][ 
+    ] 
+    node-estimated-aiv >= min-redemption-price [ 
       table:put potential-project "proposal-result" "accept"
-    ]
-  
-  if table:get potential-project "proposal-result" = "accept" and node-estimated-aiv >= min-redemption-price [
       core.proj-investor-accept node-estimated-aiv
     ]
+  )
 end
 
 ;; operations node run this procedure to update the current project list of project investors 
@@ -193,19 +204,17 @@ end
 
 ;; project investors run this procedure to update project information each tick
 to core.update-project-info
-  if potential-project != nobody and table:get potential-project "do-project?" = false [
+  if potential-project != nobody [
+    ifelse table:get potential-project "do-project?" [
+      set cash (cash - table:get potential-project "project-cost")
+      set current-projects fput potential-project current-projects
+    ][
       ;; ask patch to set proj-here false if project investor decided to not do project
       ask table:get potential-project "project-location" [
         set proj-here? false
       ]
     ]
-  if potential-project != nobody and table:get potential-project "do-project?" = true [
-      set cash (cash - table:get potential-project "project-cost")
-      set current-projects fput potential-project current-projects
-    ]
-  ask ops-nodes [
-    set proj-investors-with-new-projects-for-me (list)
-  ]
+  ] 
 end
 
 ;; project investors run this procedure to keep track of progress of their current projects
@@ -213,7 +222,7 @@ to core.update-or-complete-project
   let to-delete (list)
   
   foreach current-projects [ proj -> 
-    if time:difference-between table:get proj "project-completion-date" TIME-NOW "month" = 0 [
+    if time:is-equal table:get proj "project-completion-date" TIME-NOW [
       set completed-projects (completed-projects + 1)
       set to-delete fput proj to-delete
     ]
@@ -233,25 +242,25 @@ end
 ;; the project investors also update their variables like abilty and cash (where applicable)
 to core.complete-project-and-get-deposit-receipt [project] ;; project is a TABLE 
   let old-redemption-price-node table:get project "node-estimated-aiv"
-  let old-redemption-price-proj-investor table:get project "project-investor-estimated-aiv"
+  let old-redemption-price-PI table:get project "PI-estimated-aiv"
   ;; the project gets reassessed at completion
   let reviewed-redemption-price-node round (random-normal old-redemption-price-node (old-redemption-price-node / 5))
-  let reviewed-redemption-price-proj-investor round (random-normal old-redemption-price-proj-investor (old-redemption-price-proj-investor / 4))
+  let reviewed-redemption-price-PI round (random-normal old-redemption-price-PI (old-redemption-price-PI / 4))
   
   let new-deposit-receipt table:make
   let expost-aiv-no-anomalies table:get project "expost-aiv-given-no-anomalies"
   
-  ifelse reviewed-redemption-price-node >= reviewed-redemption-price-proj-investor [ ;; proj investor would want to cash in immediately
+  ifelse reviewed-redemption-price-node >= reviewed-redemption-price-PI [ ;; proj investor would want to cash in immediately
     set cash (cash + reviewed-redemption-price-node)
   ][ 
-    ifelse worth-hold-on? reviewed-redemption-price-proj-investor reviewed-redemption-price-node = false [
+    ifelse worth-holding? reviewed-redemption-price-PI reviewed-redemption-price-node = false [
       set cash (cash + reviewed-redemption-price-node)
     ][ ;; proj investor would want to hold on to the deposit receipt as a financial security, and declare their estimated aiv as market price
       table:put new-deposit-receipt "first-node-estimated-aiv" reviewed-redemption-price-node
-      table:put new-deposit-receipt "first-project-investor-estimated-aiv" reviewed-redemption-price-proj-investor
-      table:put new-deposit-receipt "current-market-price" reviewed-redemption-price-proj-investor ;; proj-investor cannot adjust their declared price for as long as they hold the DR
+      table:put new-deposit-receipt "first-PI-estimated-aiv" reviewed-redemption-price-PI
+      table:put new-deposit-receipt "current-market-price" reviewed-redemption-price-PI ;; proj-investor cannot adjust their declared price for as long as they hold the DR
       table:put new-deposit-receipt "expost-aiv-no-anomalies" expost-aiv-no-anomalies
-      table:put new-deposit-receipt "project-investor-estimated-aiv-per-year" precision (reviewed-redemption-price-proj-investor / 75) 2
+      table:put new-deposit-receipt "PI-estimated-aiv-per-year" precision (reviewed-redemption-price-PI / 75) 2
       table:put new-deposit-receipt "node-estimated-aiv-per-year" precision (reviewed-redemption-price-node / 75) 2
       table:put new-deposit-receipt "expost-no-anomalies-aiv-per-year" precision (expost-aiv-no-anomalies / 75) 2
       table:put new-deposit-receipt "carry-start-date" time:copy TIME-NOW
@@ -266,26 +275,22 @@ to core.complete-project-and-get-deposit-receipt [project] ;; project is a TABLE
     set ability (ability + 0.01)]
 end
 
-;; project investors run this procedure to update (completed) project location ecological health
+;; project investors run this procedure to update (completed) project location soil health
 to core.update-patch-stats [project]
   let finished-project-location table:get project "project-location"
-  let finished-project-goal-eco-health table:get project "goal-eco-health"
+  let finished-project-goal-soil-health table:get project "goal-soil-health"
   ask finished-project-location [
-    set ecological-health finished-project-goal-eco-health
+    set soil-health finished-project-goal-soil-health
     set proj-counter (proj-counter + 1)
     set proj-here? false
-    set pcolor scale-color ([color] of min-one-of CENTRALIZED-OPS-NODES [distance myself]) ecological-health -200 200
+    set pcolor scale-color base-color soil-health -200 200
   ]
 end
 
 ;; project investors run this to check if the deposit receipt is worth holding on to
-to-report worth-hold-on? [proj-investor-estimated-aiv node-estimated-aiv]
-  let cost-of-carry (tax-rate * proj-investor-estimated-aiv) * 75 ;; assuming they pay taxes annually and holds it to term
-  ifelse (proj-investor-estimated-aiv - cost-of-carry) > node-estimated-aiv [
-    report true
-  ][
-    report false
-  ]
+to-report worth-holding? [PI-estimated-aiv node-estimated-aiv]
+  let cost-of-carry (tax-rate * PI-estimated-aiv) * 75 ;; assuming they pay taxes annually and holds it to term
+  report (PI-estimated-aiv - cost-of-carry) > node-estimated-aiv
 end
 
 ;; project investors run this procedure to update each of the deposit receipts they're holding
@@ -295,12 +300,14 @@ to core.update-deposit-receipts
     let carry-start-date table:get dr "carry-start-date"
     let carry-end-date table:get dr "carry-end-date"
     table:put dr "time-held" (12 * time:difference-between carry-start-date TIME-NOW "years") + time:difference-between carry-start-date TIME-NOW "months" ;; this is in months overall
+    ;; make reporter, total time diff in months (w 2 dates as input)
     let time-held table:get dr "time-held"
-    let expost-aiv-no-anomalies table:get dr "expost-aiv-no-anomalies"
     
-    (ifelse time:difference-between TIME-NOW carry-end-date "day" = 0 [
-        core.redeem-deposit-receipt dr expost-aiv-no-anomalies
-      ] time-held > 1 and time-held mod 12 = 0 [
+    (ifelse 
+      time:is-equal TIME-NOW carry-end-date [
+        core.redeem-deposit-receipt dr table:get dr "expost-aiv-no-anomalies"
+      ] 
+      time-held > 1 and time-held mod 12 = 0 [
         core.pay-deposit-receipt-tax dr
         core.reassess-aiv-value dr
       ]
@@ -312,38 +319,36 @@ end
 ;; and decide if their most profitable action would be redeeming it prematurely
 to core.reassess-aiv-value [deposit-receipt]
   let years-passed (table:get deposit-receipt "time-held") / 12
-  let project-investor-per-year-estimate table:get deposit-receipt "project-investor-estimated-aiv-per-year"
+  let PI-per-year-estimate table:get deposit-receipt "PI-estimated-aiv-per-year"
   let node-per-year-estimate table:get deposit-receipt "node-estimated-aiv-per-year"
   let expost-per-year table:get deposit-receipt "expost-no-anomalies-aiv-per-year"
+  let time-remaining (75 - years-passed)
   
   let expost-aiv-realized (years-passed * expost-per-year)
-  let project-investor-remaining-aiv-estimate (75 - years-passed) * project-investor-per-year-estimate
-  let node-remaining-aiv-estimate (75 - years-passed) * node-per-year-estimate
+  let PI-remaining-aiv-estimate (time-remaining) * PI-per-year-estimate
+  let node-remaining-aiv-estimate (time-remaining) * node-per-year-estimate
   
-  let current-project-investor-aiv-estimate precision (expost-aiv-realized + project-investor-remaining-aiv-estimate) 2
+  let current-PI-aiv-estimate precision (expost-aiv-realized + PI-remaining-aiv-estimate) 2
   let current-node-aiv-estimate precision (expost-aiv-realized + node-remaining-aiv-estimate) 2
   
-  table:put deposit-receipt "current-project-investor-estimated-aiv" current-project-investor-aiv-estimate
+  table:put deposit-receipt "current-PI-estimated-aiv" current-PI-aiv-estimate
   table:put deposit-receipt "current-node-estimated-aiv" current-node-aiv-estimate
   
   let current-market-price table:get deposit-receipt "current-market-price"
-  let cost-of-carry (tax-rate * current-market-price) * (75 - years-passed)
+  let cost-of-carry (tax-rate * current-market-price) * (time-remaining)
+ 
   
-  (ifelse current-node-aiv-estimate >= current-market-price [ ;; market price is proj investor's first (probably higher) estimate
-      core.redeem-deposit-receipt deposit-receipt current-node-aiv-estimate
-    ] current-node-aiv-estimate >= current-project-investor-aiv-estimate [
-      core.redeem-deposit-receipt deposit-receipt current-node-aiv-estimate
-    ] (current-project-investor-aiv-estimate - cost-of-carry) <= current-node-aiv-estimate [
-      core.redeem-deposit-receipt deposit-receipt current-node-aiv-estimate
-    ]
-  )
+  if current-node-aiv-estimate >= current-market-price ;; market price is proj investor's first (probably higher) estimate
+  or current-node-aiv-estimate >= current-PI-aiv-estimate
+  or (current-PI-aiv-estimate - cost-of-carry) <= current-node-aiv-estimate [
+    core.redeem-deposit-receipt deposit-receipt current-node-aiv-estimate
+  ]
 end
 
 ;; project investors run this procedure to redeem a particular deposit receipt they're holding
 to core.redeem-deposit-receipt [deposit-receipt redemption-price]
   set cash (cash + redemption-price)
   set deposit-receipts remove deposit-receipt deposit-receipts
-  set drs-redeemed-after-market drs-redeemed-after-market + 1 ;; temporary tracker
 end
 
 ;; project investors run this procedure to pay taxes on a deposit receipt
@@ -351,5 +356,4 @@ to core.pay-deposit-receipt-tax [deposit-receipt]
   let current-market-price table:get deposit-receipt "current-market-price"
   let annual-tax (current-market-price * tax-rate)
   set cash (cash - annual-tax)
-  set taxes-paid (taxes-paid + annual-tax) ;; temporary tracker
 end
