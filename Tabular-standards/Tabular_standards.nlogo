@@ -19,21 +19,18 @@ turtles-own [
   marginal-revenue
   marginal-cost
   total-revenue
-  unit-productivity-of-capital ;marginal productivity of capital
+  marginal-productivity-of-capital ;marginal productivity of capital
   labor-force-size
   contract
   total-cost
-  cash ;maybe call lifetime profits
+  lifetime-profits ;maybe call lifetime profits
 ]
 
 to setup
   clear-all
-  set DATE time:anchor-to-ticks time:create "2000/01/01" 1 "months"
+  set DATE time:anchor-to-ticks time:create "1972/08/22" 1 "month"
   if market-type = "PC" [
-    let initial-MARKET-PRICE precision (random-normal 30 0.5) 2
-    if initial-MARKET-PRICE < 1 [set initial-MARKET-PRICE 1]
-    set MARKET-PRICE ts-create ["Prices"]
-    set MARKET-PRICE ts-add-row MARKET-PRICE (list DATE initial-MARKET-PRICE)
+    set MARKET-PRICE ts-load "cotton-prices-historical-chart-data.csv"
     let initial-WAGE-RATE precision (random-normal 3000 250) 2
     set WAGE-RATE ts-create ["Wage rate"]
     set WAGE-RATE ts-add-row WAGE-RATE (list DATE initial-WAGE-RATE)
@@ -49,8 +46,8 @@ to setup
       set marginal-revenue current-market-price
     ]
     set marginal-cost [quantity -> (- 2 * current-wage-rate * production-ceiling) / (quantity * (quantity - production-ceiling))]
-    set unit-productivity-of-capital 2
-    set cash 0
+    set marginal-productivity-of-capital 2
+    set lifetime-profits 0
   ]
   create-turtles 1 [
     set shape "truck"
@@ -59,17 +56,16 @@ to setup
     set production-ceiling (random-normal 5000 150)
     set labor-production [quantity -> ln (- quantity / (quantity - production-ceiling)) + 5]
     set marginal-cost [quantity -> (- current-wage-rate * production-ceiling) / (quantity * (quantity - production-ceiling))]
-    set cash 0
+    set lifetime-profits 0
   ]
   negotiate-contract turtle 0 turtle 1
-  set CURRENT-PRICE-CHANGE-INFO generate-price-change-table
   reset-ticks
 end
 
 to negotiate-contract [consumer-firm input-firm]
   let new-contract table:make
   let consumer-good-production ideal-production consumer-firm
-  let amount-of-input-needed ceiling (item 1 consumer-good-production / ([unit-productivity-of-capital] of consumer-firm))
+  let amount-of-input-needed ceiling (item 1 consumer-good-production / ([marginal-productivity-of-capital] of consumer-firm))
   let minimum-input-price average-total-cost input-firm amount-of-input-needed
   let maximum-input-price (current-market-price - ((current-wage-rate * (item 0 consumer-good-production)) / (item 1 consumer-good-production)))
   if minimum-input-price > maximum-input-price [
@@ -79,6 +75,7 @@ to negotiate-contract [consumer-firm input-firm]
     set current-entry replace-item 1 current-entry (precision (current-market-price + difference + (random-float 5)) 2)
     set MARKET-PRICE replace-item (num-prices - 1) MARKET-PRICE current-entry
     set maximum-input-price (current-market-price - ((current-wage-rate * (item 0 consumer-good-production)) / (item 1 consumer-good-production)))
+    ask one-of patches [set pcolor red]
   ]
   let price-midpoint ((maximum-input-price + minimum-input-price) / 2)
   let input-price precision ((price-midpoint) + (random (maximum-input-price - price-midpoint)) - (random (maximum-input-price - price-midpoint))) 2
@@ -105,7 +102,7 @@ to-report average-total-cost [firm quantity]
 end
 
 to-report current-market-price
-  report last last MARKET-PRICE
+  report 50 * (ts-get MARKET-PRICE DATE " value")
 end
 
 to-report current-wage-rate
@@ -154,225 +151,81 @@ to-report ideal-production [firm]
 end
 
 to go
-  ;if count turtles = 0 [stop]
+  transact
+  tick
+end
+
+to transact
   let negotiation-date false
-  ;make these procedures
   ask one-of turtles with [firm-type = "Consumer-good"] [
-    let contract-quantity (table:get contract "Quantity of good" * unit-productivity-of-capital)
+    let contract-quantity (table:get contract "Quantity of good" * marginal-productivity-of-capital)
     let amount-sold round (random-normal contract-quantity (0.02 * contract-quantity))
     if amount-sold > contract-quantity [set amount-sold contract-quantity]
     set total-revenue (amount-sold * current-market-price)
     set total-cost ((labor-force-size * current-wage-rate) + (table:get contract "Unit-price of good" * table:get contract "Quantity of good"))
     if time:is-equal table:get contract "Expiration date" DATE [set negotiation-date true]
-    set cash (cash + total-revenue - total-cost)
+    set lifetime-profits (lifetime-profits + total-revenue - total-cost)
   ]
   ask one-of turtles with [firm-type = "Input"] [
     let amount-sold table:get contract "Quantity of good"
     set total-revenue (amount-sold * table:get contract "Unit-price of good")
     set total-cost (labor-force-size * current-wage-rate)
     if time:is-equal table:get contract "Expiration date" DATE [set negotiation-date true]
-    set cash (cash + total-revenue - total-cost)
+    set lifetime-profits (lifetime-profits + total-revenue - total-cost)
   ]
-  let unfavorable-contract? any? turtles with [cash < 0]
+  let unfavorable-contract? any? turtles with [lifetime-profits < 0]
   if negotiation-date or unfavorable-contract? [
     show "renegotiating"
     negotiate-contract (one-of turtles with [firm-type = "Consumer-good"]) (one-of turtles with [firm-type  = "Input"])
   ]
-  adjust-market-price
-  tick
 end
 
 to test-price
-  adjust-market-price
   tick
 end
-
-to-report average-market-price
-  let price-list map [x -> item 1 x] MARKET-PRICE
-  report mean price-list
-end
-
-to-report generate-price-change-table
-  let series-length 0
-  let goal-price 0
-  let end-date 0
-  ifelse length MARKET-PRICE = 1[
-    set series-length round (random-normal 30 4) ;change name
-    if series-length < 15 [set series-length 15]
-    set goal-price (precision (current-market-price * (random-normal 1 0.02)) 2)
-    set end-date time:plus DATE series-length "months"
-  ][
-    set series-length (random 60) + 1
-    let price-change-factor (random-normal (average-market-price / current-market-price) 0.3)
-    if price-change-factor < 0.1 [set price-change-factor 0.1]
-    set goal-price (precision (current-market-price * price-change-factor) 2)
-    set end-date time:plus DATE series-length "months"
-  ]
-  let new-table table:make
-  table:put new-table "Goal price" goal-price
-  let average-monthly-change ((goal-price / current-market-price) ^ (1 / series-length))
-  table:put new-table "Average change" average-monthly-change
-  table:put new-table "End date" end-date
-  report new-table
-end
-
-to adjust-market-price
-  ifelse time:is-equal table:get CURRENT-PRICE-CHANGE-INFO "End date" DATE [
-    let price table:get CURRENT-PRICE-CHANGE-INFO "Goal price"
-    set MARKET-PRICE ts-add-row MARKET-PRICE (list DATE price)
-    set CURRENT-PRICE-CHANGE-INFO generate-price-change-table
-  ][
-    let price-change-factor (random-normal (table:get CURRENT-PRICE-CHANGE-INFO "Average change") 0.1)
-    if price-change-factor < 0.1 [set price-change-factor 0.1]
-    let price (current-market-price * price-change-factor)
-    set MARKET-PRICE ts-add-row MARKET-PRICE (list DATE price)
-  ]
-end
-
-;__includes ["tabular-standards-algorithms.nls"]
 ;
-;globals[
-;  current-wage-rate
-;  current-market-price
-;  AVERAGE-CONSUMER-DEMAND
-;  DATE
-;]
-;
-;turtles-own[
-;  contract
-;  total-cost
-;  total-revenue
-;]
-;
-;breed [consumer-firms consumer-firm]
-;
-;breed [input-firms input-firm]
-;
-;consumer-firms-own [
-;  unit-productivity-of-labor
-;  amount-of-labor
-;  unit-productivity-of-capital
-;  cost-of-other-inputs
-;]
-;;maybe make the firms the same breed and add in labor for the input firms because they probably need it too
-;input-firms-own[
-;  unit-capital-costs
-;]
-;
-;to setup
-;  clear-all
-;  set current-market-price precision (random-normal 20 0.5) 2
-;  set DATE time:anchor-to-ticks (time:create "2000/01/01") 1 "months"
-;  set AVERAGE-CONSUMER-DEMAND precision (random-normal 1000 100) 0
-;  set current-wage-rate precision (random-normal 3000 100) 2
-;  create-consumer-firms 1 [
-;    set shape "truck"
-;    setxy -25 0
-;    set unit-productivity-of-labor 300
-;    set unit-productivity-of-capital 0.5
-;    set cost-of-other-inputs precision (random-normal 5000 1000) 2
-;  ]
-;  create-input-firms 1 [
-;    set shape "truck"
-;    setxy 25 0
-;    set unit-capital-costs precision (random-normal 3 0.25) 2
-;  ]
-;  negotiate-contract (one-of consumer-firms) (one-of input-firms)
-;  reset-ticks
+;to-report average-market-price
+;  let price-list butfirst (map [x -> item 1 x] MARKET-PRICE)
+;  report mean price-list
 ;end
 ;
-;to negotiate-contract [consumer input]
-;  let new-contract table:make
-;  let amount-of-capital-needed (AVERAGE-CONSUMER-DEMAND * ([unit-productivity-of-capital] of consumer))
-;  let cost-of-labor get-labor-costs consumer AVERAGE-CONSUMER-DEMAND
-;  let total-revenue-of-consumer (AVERAGE-CONSUMER-DEMAND * current-market-price)
-;  let minimum-asking-price-of-capital (([unit-capital-costs] of input) * amount-of-capital-needed)
-;  let current-costs cost-of-labor + ([cost-of-other-inputs] of consumer)
-;  if (total-revenue-of-consumer - current-costs) < minimum-asking-price-of-capital [
-;    show "failed"
-;    stop
+;to-report generate-price-change-table
+;  let series-length 0
+;  let goal-price 0
+;  let end-date 0
+;  ifelse length MARKET-PRICE = 1[
+;    set series-length round (random-normal 30 4) ;change name
+;    if series-length < 15 [set series-length 15]
+;    set goal-price (precision (current-market-price * (random-normal 1 0.02)) 2)
+;    set end-date time:plus DATE series-length "months"
+;  ][
+;    set series-length (random 60) + 1
+;    let price-change-factor (random-normal (average-market-price / current-market-price) 0.3)
+;    if price-change-factor < 0.1 [set price-change-factor 0.1]
+;    set goal-price (precision (current-market-price * price-change-factor) 2)
+;    set end-date time:plus DATE series-length "months"
 ;  ]
-;  let contract-made false
-;  let maximum-price-of-capital (total-revenue-of-consumer - current-costs) ;change to "total-other-costs" or something
-;  let midpoint (maximum-price-of-capital + minimum-asking-price-of-capital) / 2
-;  let difference (maximum-price-of-capital - minimum-asking-price-of-capital) / 2
-;  let price-of-capital precision (midpoint + (random-float difference) - (random-float difference)) 2
-;  table:put new-contract "Parties" (list consumer input)
-;  table:put new-contract "Amount of capital" amount-of-capital-needed
-;  table:put new-contract "Price of capital" price-of-capital
-;  table:put new-contract "Expiration date" time:plus DATE 5 "years"
-;  ask consumer [
-;    set contract new-contract
-;    set total-cost price-of-capital + current-costs
-;    set amount-of-labor (AVERAGE-CONSUMER-DEMAND / unit-productivity-of-labor)
-;  ]
-;  ask input [
-;    set contract new-contract
-;    set total-cost unit-capital-costs * amount-of-capital-needed
-;  ]
+;  let new-table table:make
+;  table:put new-table "Goal price" goal-price
+;  let average-monthly-change ((goal-price / current-market-price) ^ (1 / series-length))
+;  table:put new-table "Average change" average-monthly-change
+;  table:put new-table "End date" end-date
+;  report new-table
 ;end
 ;
-;to go
-;  if count turtles = 0 [stop]
-;  let amount-sold (random-normal AVERAGE-CONSUMER-DEMAND 70)
-;  ask one-of consumer-firms [
-;    set total-revenue amount-sold * current-market-price
-;    show total-revenue
-;    show total-cost
+;to adjust-market-price
+;  ifelse time:is-equal table:get CURRENT-PRICE-CHANGE-INFO "End date" DATE [
+;    let price table:get CURRENT-PRICE-CHANGE-INFO "Goal price"
+;    set MARKET-PRICE ts-add-row MARKET-PRICE (list DATE price)
+;    set CURRENT-PRICE-CHANGE-INFO generate-price-change-table
+;  ][
+;    let price-change-factor (random-normal (table:get CURRENT-PRICE-CHANGE-INFO "Average change") 0.1)
+;    if price-change-factor < 0.1 [set price-change-factor 0.1]
+;    let price (current-market-price * price-change-factor)
+;    set MARKET-PRICE ts-add-row MARKET-PRICE (list DATE price)
 ;  ]
-;  ask one-of input-firms [
-;    set total-revenue (table:get contract "Price of capital")
-;    show total-revenue
-;    show total-cost
-;    let unfavorable-contract any? turtles with [total-cost > total-revenue]
-;    show unfavorable-contract
-;    if DATE = table:get contract "Expiration date" or unfavorable-contract[
-;      negotiate-contract (item 0 table:get contract "Parties") self
-;      ask one-of patches [set pcolor yellow]
-;    ]
-;  ]
-;  let demand-change-factor (random-normal 1 0.02)
-;  if random 100 < 5 [
-;    ifelse random 2 = 0 [
-;      set demand-change-factor (random-normal 1.5 0.02)
-;    ][
-;      set demand-change-factor (random-normal 0.5 0.02)
-;    ]
-;  ]
-;  set AVERAGE-CONSUMER-DEMAND precision (AVERAGE-CONSUMER-DEMAND * demand-change-factor) 2
-;  let supply-change-factor (random-normal 1 0.02)
-;  if random 100 < 5 [
-;    ifelse random 2 = 0 [
-;      set supply-change-factor (random-normal 1.5 0.02)
-;    ][
-;      set supply-change-factor (random-normal 0.5 0.02)
-;    ]
-;  ]
-;  set current-market-price precision ((1 + (((1 - supply-change-factor) + (demand-change-factor - 1)) / 2)) * current-market-price) 2
-;  set current-wage-rate precision ((random-normal 1 0.02) * current-wage-rate) 2
-;  ask one-of input-firms [
-;    let cost-change-factor (random-normal 1 0.02)
-;    if random 100 < 5 [
-;      ifelse random 2  = 0 [
-;        set cost-change-factor (random-normal 1.5 0.02)
-;      ][
-;        set cost-change-factor (random-normal 0.5 0.02)
-;      ]
-;    ]
-;    set unit-capital-costs precision (unit-capital-costs * cost-change-factor) 2
-;  ]
-;  ask one-of consumer-firms [
-;    set total-cost (table:get contract "Price of capital" + cost-of-other-inputs + (amount-of-labor * current-wage-rate))
-;  ]
-;  ask one-of input-firms [
-;    set total-cost (table:get contract "Amount of capital" * unit-capital-costs)
-;  ]
-;  tick
 ;end
-;
-;to-report get-labor-costs [firm quantity-to-produce]
-;  report (current-wage-rate * (ceiling (quantity-to-produce / [unit-productivity-of-labor] of firm)))
-;end
+
 @#$#@#$#@
 GRAPHICS-WINDOW
 210
@@ -436,10 +289,10 @@ NIL
 1
 
 PLOT
-1
-281
-201
-431
+8
+303
+188
+453
 Price
 NIL
 NIL
@@ -462,23 +315,6 @@ market-type
 market-type
 "PC" "MC"
 0
-
-BUTTON
-46
-204
-139
-237
-NIL
-test-price
-T
-1
-T
-OBSERVER
-NIL
-NIL
-NIL
-NIL
-1
 
 @#$#@#$#@
 ## WHAT IS IT?
