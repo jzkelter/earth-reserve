@@ -111,7 +111,7 @@ to go
   ]
 
   ask proj-investors [
-    core.update-or-complete-project
+    core.update-or-complete-projects
     core.look-for-new-project
   ]
 
