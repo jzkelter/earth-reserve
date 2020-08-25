@@ -1,5 +1,5 @@
-;; project investors run this once for each DR at the point of creation
 to RED.prepare-deposit-receipt-for-trading [dr]
+;; project investors run this once for each DR at the point of creation
   let node-aiv-estimate-history ts-create "node-estimated-value"
   table:put dr "node-aiv-estimate-history" node-aiv-estimate-history
   
@@ -16,42 +16,30 @@ to RED.prepare-deposit-receipt-for-trading [dr]
   RED.record-expost-aiv-per-year-owner-estimate dr owner-per-year-estimate
 end
 
-;; observer runs this procedure to update ex-post aiv realized so far, called in RED.update-deposit-receipts
 to RED.update-expost-aiv-realized-so-far [dr]
-  let expost-aiv-so-far table:get dr "expost-aiv-realized-so-far" ;; the part of the aiv that is already realized at this time, just a number
-  let expost-aiv-per-year-no-anomalies table:get dr "expost-no-anomalies-aiv-per-year"
-  let aiv-realized-this-year expost-aiv-per-year-no-anomalies ;; assuming no anomalies every year for now
-  set expost-aiv-so-far (expost-aiv-so-far + aiv-realized-this-year)
-  table:put dr "expost-aiv-realized-so-far" expost-aiv-so-far
-  ;; can add if branch for anomalies later
-  ;; if anomaly happens estimate new expost per year, date will be when it happened
+;; observer runs this procedure to update ex-post aiv realized so far, called in RED.update-deposit-receipts
+  table:put dr "expost-aiv-realized-so-far" (table:get dr "expost-aiv-realized-so-far") + (table:get dr "expost-aiv-per-year")
 end
 
-;; project invesors run this, once at the start then again if there are anomalies
 to RED.record-expost-aiv-per-year-node-estimate [dr new-per-year-estimate]
-  let expost-aiv-per-year-estimate table:get dr "expost-aiv-per-year-node-estimate-history"
-  set expost-aiv-per-year-estimate ts-add-row expost-aiv-per-year-estimate (sentence (TIME-NOW) (new-per-year-estimate))
-  table:put dr "expost-aiv-per-year-node-estimate-history" expost-aiv-per-year-estimate
+;; project invesors run this, once at the start then again if there are anomalies
+  table:put dr "expost-aiv-per-year-node-estimate-history" ts-add-row (table:get dr "expost-aiv-per-year-node-estimate-history") (sentence TIME-NOW new-per-year-estimate)
 end
 
-;; project investors run this, once at the start, if there are anomalies, and every time the DR changes owners
 to RED.record-expost-aiv-per-year-owner-estimate [dr new-per-year-estimate]
-  let expost-aiv-per-year-estimate table:get dr "expost-aiv-per-year-owner-estimate-history"
-  set expost-aiv-per-year-estimate ts-add-row expost-aiv-per-year-estimate (sentence (TIME-NOW) (new-per-year-estimate))
-  table:put dr "expost-aiv-per-year-owner-estimate-history" expost-aiv-per-year-estimate
+;; project investors run this, once at the start, if there are anomalies, and every time the DR changes owners
+  table:put dr "expost-aiv-per-year-owner-estimate-history" ts-add-row (table:get dr "expost-aiv-per-year-owner-estimate-history") (sentence TIME-NOW new-per-year-estimate)
 end
 
 ;; later might need to reestimate remaining aiv (instead of sticking with initial per year estimate)
 
-;; project investors run this procedure
 to RED.record-node-aiv-history [dr new-node-aiv-estimate]
-  let node-aiv-estimate-history table:get dr "node-aiv-estimate-history"
-  set node-aiv-estimate-history ts-add-row node-aiv-estimate-history (sentence (TIME-NOW) (new-node-aiv-estimate))
-  table:put dr "node-aiv-estimate-history" node-aiv-estimate-history
+;; project investors run this procedure
+  table:put dr "node-aiv-estimate-history" ts-add-row (table:get dr "node-aiv-estimate-history") (sentence TIME-NOW new-node-aiv-estimate)
 end
 
-;; the observer runs this procedure
 to RED.go [deposit-receipt-list]
+;; the observer runs this procedure
   foreach ALL-DEPOSIT-RECEIPTS [dr -> 
     table:put dr "in-transaction?" true
   ]
@@ -60,8 +48,8 @@ to RED.go [deposit-receipt-list]
   ]
 end
 
-;; the observer runs this procedure
 to RED.update-deposit-receipts 
+;; the observer runs this procedure
   foreach ALL-DEPOSIT-RECEIPTS [ dr ->
     let carry-start-date table:get dr "carry-start-date"
     let carry-end-date table:get dr "carry-end-date"
@@ -73,8 +61,8 @@ to RED.update-deposit-receipts
   ]
 end
 
-;; project investors run this procedure
 to RED.check-auto-node-redeem
+;; project investors run this procedure
   foreach deposit-receipts [ dr ->
     let time-held table:get dr "time-held"
     (ifelse 
@@ -82,15 +70,15 @@ to RED.check-auto-node-redeem
         ;; does the node still need to update estimate first? negligible?
         RED.redeem-deposit-receipt dr RED.node-latest-estimate dr
       ]
-      RED.node-latest-estimate dr >= table:get dr "current-market-price" [
+      RED.node-latest-estimate dr >= table:get dr "market-price" [
         RED.redeem-deposit-receipt dr RED.node-latest-estimate dr
       ]
     )
   ]
 end
 
-;; project investors run this procedure
 to RED.check-if-owner-wants-to-redeem
+;; project investors run this procedure
   foreach deposit-receipts [ dr ->
     let time-held table:get dr "time-held"
     if time-held > 1 and time-held mod 12 = 0 [
@@ -99,8 +87,9 @@ to RED.check-if-owner-wants-to-redeem
   ]
 end
 
-;; project investors run this procedure
-to RED.reassess-aiv-value-and-maybe-redeem [dr] ;; both parties reassess here
+
+to RED.reassess-aiv-value-and-maybe-redeem [dr]
+;; project investors run this procedure but both parties reassess here
   let years-passed (table:get dr "time-held") / 12
   let owner-per-year-estimate ts-get table:get dr "expost-aiv-per-year-owner-estimate-history" TIME-NOW "owner-per-year-estimate"
   let node-per-year-estimate ts-get table:get dr "expost-aiv-per-year-node-estimate-history" TIME-NOW "node-per-year-estimate" 
@@ -114,11 +103,11 @@ to RED.reassess-aiv-value-and-maybe-redeem [dr] ;; both parties reassess here
   let current-node-aiv-estimate precision (expost-aiv-realized + node-remaining-aiv-estimate) 2
   
   table:put dr "current-owner-estimated-aiv" current-owner-aiv-estimate
-  table:put dr "current-node-estimated-aiv" current-node-aiv-estimate
+  table:put dr "node-estimated-aiv" current-node-aiv-estimate
   
-  RED.record-node-aiv-history dr table:get dr "current-node-estimated-aiv"
+  RED.record-node-aiv-history dr table:get dr "node-estimated-aiv"
   
-  let current-market-price table:get dr "current-market-price"
+  let current-market-price table:get dr "market-price"
   let cost-of-carry (tax-rate * current-market-price) * (time-remaining)
   
   if (current-owner-aiv-estimate - cost-of-carry) <= current-node-aiv-estimate [
@@ -126,8 +115,8 @@ to RED.reassess-aiv-value-and-maybe-redeem [dr] ;; both parties reassess here
   ]
 end
 
-;; project investors run this procedure
 to-report RED.FA-assess-aiv-value [dr]
+;; project investors run this procedure
   let years-passed (table:get dr "time-held") / 12
   let time-remaining (75 - years-passed)
   let expost-aiv-realized table:get dr "expost-aiv-realized-so-far"
@@ -139,7 +128,7 @@ to-report RED.FA-assess-aiv-value [dr]
   let my-aiv-estimate precision (expost-aiv-realized + my-remaining-aiv-estimate) 2 
   
   let cost-of-carry (tax-rate * my-aiv-estimate) * (time-remaining) ;; because if this FA buys they will declare their estimate as market price
-  report (list (my-aiv-estimate) (my-aiv-estimate - cost-of-carry))
+  report (list my-aiv-estimate (my-aiv-estimate - cost-of-carry))
 end
 
 
@@ -158,11 +147,11 @@ to-report RED.node-latest-estimate [dr]
   report ts-get table:get dr "node-aiv-estimate-history" TIME-NOW "node-estimated-value"
 end
 
-;; project investors run this procedure to potentially buy a DR from the market
 to RED.transact [dep-receipts] ;; takes all-deposit-receipts as input, a list of DRs
+;; project investors run this procedure to potentially buy a DR from the market
   let current-turtle self
   
-  let potential-dep-receipts filter [dr -> (table:get dr "current-market-price") < cash and (table:get dr "in-transaction?") = true and (table:get dr "current-owner") != current-turtle] dep-receipts
+  let potential-dep-receipts filter [dr -> (table:get dr "market-price") < cash and (table:get dr "in-transaction?") = true and (table:get dr "owner") != current-turtle] dep-receipts
   let subset-potential-dep-receipts up-to-n-of n-drs-checked potential-dep-receipts
   
   ;; or maybe can use if subset-potential-dep-receipts != (list) [] instead of if statement a bit below 
@@ -171,14 +160,14 @@ to RED.transact [dep-receipts] ;; takes all-deposit-receipts as input, a list of
   let best-profit-dr (list)
   
   foreach subset-potential-dep-receipts [dr ->
-    let current-price table:get dr "current-market-price"
+    let current-price table:get dr "market-price"
     let estimation-result RED.FA-assess-aiv-value dr
     let my-profit-estimate item 1 estimation-result
     let my-aiv-estimate item 0 estimation-result
     
     if my-profit-estimate > best-profit-so-far [
       set best-profit-so-far my-profit-estimate
-      set best-profit-dr (list (dr)(current-price)(my-profit-estimate)(my-aiv-estimate))
+      set best-profit-dr (list dr current-price my-profit-estimate my-aiv-estimate)
     ]
   ]
   
@@ -192,17 +181,17 @@ to RED.transact [dep-receipts] ;; takes all-deposit-receipts as input, a list of
       let monthly-tax-for-new-owner precision ((new-owner-aiv-estimate * tax-rate) / 12) 4
       set ERA-monthly-tax-bill (ERA-monthly-tax-bill + monthly-tax-for-new-owner)
       set deposit-receipts fput dr deposit-receipts
-      ask table:get dr "current-owner" [
+      ask table:get dr "owner" [
         set cash (cash + current-price)
-        let monthly-tax-for-old-owner precision ((table:get dr "current-market-price" * tax-rate) / 12) 4
+        let monthly-tax-for-old-owner precision ((table:get dr "market-price" * tax-rate) / 12) 4
         set ERA-monthly-tax-bill (ERA-monthly-tax-bill - monthly-tax-for-old-owner)
         if ERA-monthly-tax-bill < 0 [ set ERA-monthly-tax-bill 0 ]
         set deposit-receipts remove dr deposit-receipts
       ]
-      table:put dr "current-owner" current-turtle
-      table:put dr "current-market-price" new-owner-aiv-estimate
+      table:put dr "owner" current-turtle
+      table:put dr "market-price" new-owner-aiv-estimate
     
-      let new-owner-per-year-estimate precision ((table:get dr "current-market-price") / 75) 2
+      let new-owner-per-year-estimate precision ((table:get dr "market-price") / 75) 2
       RED.record-expost-aiv-per-year-owner-estimate dr new-owner-per-year-estimate
     
       table:put dr "in-transaction?" false
@@ -210,11 +199,10 @@ to RED.transact [dep-receipts] ;; takes all-deposit-receipts as input, a list of
   ]
 end
 
-
-;; project investors run this procedure
 to RED.redeem-deposit-receipt [deposit-receipt redemption-price]
+;; project investors run this procedure to cash a deposit receipt in with a node
   set cash (cash + redemption-price)
-  let monthly-tax-on-dr precision ((table:get deposit-receipt "current-market-price" * tax-rate) / 12) 4
+  let monthly-tax-on-dr precision ((table:get deposit-receipt "market-price" * tax-rate) / 12) 4
   set ERA-monthly-tax-bill (ERA-monthly-tax-bill - monthly-tax-on-dr)
   if ERA-monthly-tax-bill < 0 [ set ERA-monthly-tax-bill 0 ]
   set deposit-receipts remove deposit-receipt deposit-receipts
@@ -222,8 +210,8 @@ to RED.redeem-deposit-receipt [deposit-receipt redemption-price]
   set TOTAL-AMOUNT-MONEY (TOTAL-AMOUNT-MONEY + redemption-price)
 end
 
-;; project investors run this procedure
 to RED.pay-deposit-receipt-tax 
+;; project investors run this procedure to pay taxes each tick (month)
   set cash (cash - ERA-monthly-tax-bill)
 end
 
