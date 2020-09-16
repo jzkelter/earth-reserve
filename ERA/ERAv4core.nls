@@ -1,0 +1,351 @@
+to core.soil-degradation
+;; observer runs this procedure for background soil degradation
+  ask patches with [soil-health > 1][ 
+    set soil-health (soil-health * (1 - soil-degrade-rate ecoregion))
+    set pcolor scale-color base-color soil-health -200 200
+    ]
+end
+
+to-report soil-degrade-rate [ecoregion-input]
+;; patches use this reporter
+;; this will eventually be "hard-coded"/taking input from dataset based on eco-agro zones 
+  (ifelse 
+    ecoregion-input = "A" [
+      report avg-soil-deg-rate - (avg-soil-deg-rate / 2)
+    ] 
+    ecoregion-input = "B" [
+      report avg-soil-deg-rate + (avg-soil-deg-rate / 2)
+    ] 
+    ecoregion-input = "C" [
+      report avg-soil-deg-rate
+    ]
+  )
+end
+
+to core.look-for-new-project
+;; project investors run this procedure to document the characteristics of the potential project (if there is one)
+;; if there isn't one they move to a new place (randomly for now)
+  let bankruptcy-line 0
+  if PI-total-cash-held-in-ref home-jurisdiction >= bankruptcy-line [
+    set potential-project core.best-deal-near-me
+    
+    ifelse potential-project != nobody [    
+      move-to table:get potential-project "project-location"
+      ask patch-here [
+        set proj-here? true
+      ]
+      core.select-min-redemption-price ;; synonymous with min node AIV tolerated
+      core.choose-ops-node
+    ][
+      set heading random 360 ;; change to more systematic search at some point
+      fd (10 + random 10)
+    ]
+  ]
+end
+
+to-report core.best-deal-near-me
+;; project investors try to find the best potential project from a subset of project locations
+  let potential-projects patches in-radius 7 with [proj-here? = false 
+                                                   and soil-health < calc-optimal-health [ability] of myself]
+  if potential-projects = nobody [
+    report nobody
+  ]
+
+  let PI-ability [ability] of self
+  let best-estimated-profit-so-far 0
+  let best-potential-project-data (list)
+    
+  ask potential-projects [
+    let estimated-cost calc-estimated-cost self calc-optimal-health (PI-ability) PI-ability ;; in "local" currency (numeric output)
+    let estimated-cost-in-home-currency convert-currency [jurisdiction] of self [home-jurisdiction] of myself estimated-cost
+    
+    let PI-total-cash-in-local-currency 0
+    
+    ask myself [ ;; because this thing inside can only be called by a PI, not a patch
+      set PI-total-cash-in-local-currency PI-total-cash-held-in-ref [jurisdiction] of myself ;; total cash of PI in terms of local currency
+    ]
+    
+    ;; if the project investor cannot afford raising the health all the way to optimal, they do the same project but just invest everything they have (in all currencies)
+    if estimated-cost > PI-total-cash-in-local-currency [
+      set estimated-cost PI-total-cash-in-local-currency
+      set estimated-cost-in-home-currency convert-currency [jurisdiction] of self [home-jurisdiction] of myself estimated-cost
+    ]
+
+    let soil-health-given-investment calc-new-soil-health-given-investment PI-ability estimated-cost [soil-health] of self
+    
+    let estimated-aiv calc-estimated-aiv self soil-health-given-investment ;; in "local" currency (numeric output)
+    let estimated-aiv-in-home-currency convert-currency [jurisdiction] of self [home-jurisdiction] of myself estimated-aiv
+    
+    let estimated-profit (estimated-aiv - estimated-cost)
+    
+    if estimated-profit > best-estimated-profit-so-far [
+      set best-estimated-profit-so-far estimated-profit
+      set best-potential-project-data (list (self)(estimated-aiv-in-home-currency)(estimated-cost-in-home-currency)(soil-health-given-investment))
+    ]
+  ]
+    
+  let potential-project-table table:make
+  table:put potential-project-table "PI-estimated-aiv" 0
+  let expected-roi 0
+    
+  if length best-potential-project-data != 0 [ ;; can be 0 if all profits of potential projects are negative
+    table:put potential-project-table "project-location" first best-potential-project-data
+    table:put potential-project-table "current-soil-health" [soil-health] of first best-potential-project-data
+    table:put potential-project-table "PI-estimated-aiv" item 1 best-potential-project-data ;; in PI's home currency
+    table:put potential-project-table "project-cost" item 2 best-potential-project-data ;; in PI's home currency
+    table:put potential-project-table "goal-soil-health" item 3 best-potential-project-data
+    table:put potential-project-table "expost-aiv-given-no-anomalies" calc-expost-aiv-no-anomalies (table:get potential-project-table "current-soil-health") (table:get potential-project-table "goal-soil-health") ;; still numerical value (in project's local currency)
+    table:put potential-project-table "currency" [jurisdiction] of table:get potential-project-table "project-location" ;; is a number, not string
+    
+    set expected-roi (table:get potential-project-table "PI-estimated-aiv" - table:get potential-project-table "project-cost") / table:get potential-project-table "project-cost"
+  ]
+  
+  let min-roi 1.1 ;; saying project investors want a 10% return on their investment based on their estimates
+  
+  ifelse table:get potential-project-table "PI-estimated-aiv" >= NODE-MIN-PROJECT-SIZE 
+  and expected-roi >= min-roi [
+    let proj-length-based-on-rent-improvement round ((table:get potential-project-table "PI-estimated-aiv") / 10 * 12 + 1) ;; in months, saying about 10 units of rent improvement per year
+    
+    table:put potential-project-table "project-timeframe" proj-length-based-on-rent-improvement
+    table:put potential-project-table "project-completion-date" time:plus TIME-NOW proj-length-based-on-rent-improvement "months"
+
+    report potential-project-table
+  ][
+    report nobody
+   ]
+end
+
+to-report calc-estimated-aiv [proj-location new-soil-health]
+  let old-soil-health [soil-health] of proj-location
+  let diff-in-rent (calc-rent new-soil-health - calc-rent old-soil-health)
+  report precision random-normal diff-in-rent abs (diff-in-rent / 5) 2
+end
+
+to-report calc-estimated-cost [proj-location new-soil-health PI-ability]
+  let old-soil-health [soil-health] of proj-location
+  report precision (calc-investment new-soil-health PI-ability - calc-investment old-soil-health PI-ability) 2
+end 
+
+;; for estimated cost: to consider if firms go out of business, should be calculated at the end
+
+to-report calc-new-soil-health-given-investment [PI-ability proj-cost old-soil-health]
+  report sqrt((2 * PI-ability * c1 * proj-cost) + (old-soil-health ^ 2) + (2 * c2 * old-soil-health) + (c2 ^ 2)) - c2
+end
+
+to-report calc-rent [soil-health-input]
+  report c0 * ln(soil-health-input)
+end
+
+to-report calc-investment [soil-health-input PI-ability] ;; investment needed to get from 0 health to (soil-health-input) level
+  report ((soil-health-input ^ 2) / (2 * PI-ability * c1)) + ((c2 * soil-health-input) / (PI-ability * c1))
+end
+
+to-report calc-optimal-health [PI-ability]
+  report (- c2 + sqrt (c2 ^ 2 + (4 * PI-ability * c0 * c1))) / 2
+end
+
+to-report calc-expost-aiv-no-anomalies [old-soil-health new-soil-health]
+  let diff-in-rent (calc-rent new-soil-health - calc-rent old-soil-health)
+  report precision random-normal diff-in-rent (diff-in-rent / 5) 2 ;; variance may need to be smaller here because of less variation overall compared to estimation
+end 
+
+
+to core.select-min-redemption-price
+;; project investors run this procedure to set a minimum aiv they are willing to tolerate
+;; to be used in their decision making during proposal to the node later
+  let cost table:get potential-project "project-cost"
+  let min-return 1.1
+  let min-redemption-price cost * min-return
+  table:put potential-project "min-redemption-price" min-redemption-price ;; this will be in the PI's home currency
+end
+
+to core.choose-ops-node
+;; project investors run this procedure to choose which operations node they want to transact with
+;; right now it's assumed the only possibilities are only that of their home country or a decentralized one
+  let prob-choose-home-ops-node 80 ;; arbitrary for now
+  
+  let proj-ops-node ifelse-value (random 100 < prob-choose-home-ops-node) [
+    one-of CENTRALIZED-OPS-NODES with [node-jurisdiction = [home-jurisdiction] of myself]
+  ][
+    one-of DECENTRALIZED-OPS-NODES
+  ]
+  
+  table:put potential-project "relevant-ops-node" proj-ops-node
+  ask proj-ops-node [
+    set PIs-with-new-projects-for-me fput myself PIs-with-new-projects-for-me
+  ]
+end
+
+to core.review-proposals
+;; operations nodes run this procedure to assess the proposal of project investors who come to them
+;; within this procedure they estimate their own aiv of the proposed project
+  let relevant-PIs turtle-set [PIs-with-new-projects-for-me] of self
+  ask relevant-PIs [
+    if potential-project != nobody [
+      table:put potential-project "do-project?" false
+      core.node-accept-or-reject potential-project
+    ]
+  ]
+  set PIs-with-new-projects-for-me (list) ;; just to reset. if not keeping track, otherwise put in go procedure
+end
+
+to core.node-accept-or-reject [potential-project-table]
+;; project investors run this procedure to see the decision ops nodes make on their proposal assessment
+  let min-redemption-price table:get potential-project-table "min-redemption-price" ;; in PI's home currency
+  let PI-estimated-aiv table:get potential-project-table "PI-estimated-aiv" ;; in the PI's home currency
+  
+  let node-estimated-aiv round (random-normal PI-estimated-aiv (PI-estimated-aiv / 3)) ;; assumes the estimation is more or less the same, in PI's home currency
+  let node-currency [jurisdiction] of table:get potential-project-table "relevant-ops-node"
+  if node-currency = "decentralized" [ set node-currency 3 ] 
+  let node-estimated-aiv-in-node-currency convert-currency [home-jurisdiction] of self node-currency node-estimated-aiv
+  
+  (ifelse 
+    node-estimated-aiv-in-node-currency < NODE-MIN-PROJECT-SIZE [ ;; potential project was already filtered for it? but there's a chance the node estimation is lower
+      table:put potential-project "proposal-result" "reject"
+    ] 
+    node-estimated-aiv >= min-redemption-price [ ;; PI wants to go through with it
+      table:put potential-project "proposal-result" "accept"
+      core.proj-investor-accept node-estimated-aiv-in-node-currency
+    ]
+  )
+end
+
+to core.proj-investor-accept [node-estimated-aiv]
+;; operations node run this procedure to update the current project list of project investors 
+;; if they accept the project and the project investor goes through with it
+  table:put potential-project "node-estimated-aiv" node-estimated-aiv ;; in node's currency
+  table:put potential-project "do-project?" true
+end
+
+to core.update-project-info ;; maybe name needs a change
+;; project investors run this procedure to update info related to undertaking a new project
+  if potential-project != nobody and potential-project != (list) [
+    ifelse table:get potential-project "do-project?" [
+      let currency-index-to-change home-jurisdiction
+      
+      subtract-from-cash-holdings currency-index-to-change table:get potential-project "project-cost"
+      
+      set current-projects fput potential-project current-projects
+    ][
+      ;; ask patch to set proj-here false if project investor decided to not do project
+      ask table:get potential-project "project-location" [
+        set proj-here? false
+      ]
+    ]
+  ] 
+end
+
+to core.update-or-complete-projects
+;; project investors run this procedure to keep track of progress of their current projects
+  let to-delete (list)
+  
+  foreach current-projects [ proj -> 
+    if time:is-equal table:get proj "project-completion-date" TIME-NOW [
+      set completed-projects (completed-projects + 1)
+      set to-delete fput proj to-delete
+    ]
+  ]
+  
+  foreach to-delete [ proj ->
+    core.complete-project-and-get-deposit-receipt proj
+    core.update-patch-stats proj
+    set current-projects remove proj current-projects
+  ]
+  
+  set potential-project (list)
+end
+
+
+to core.complete-project-and-get-deposit-receipt [project] ;; project is a TABLE  
+;; project investors run this procedure to get their deposit receipt (and check if they want to cash in immediately)
+;; the project investors also update their variables like abilty and cash (where applicable)
+  let old-redemption-price-node table:get project "node-estimated-aiv" ;; in node's currency
+  ;; the operations node reassesses the project at completion
+  let reviewed-redemption-price-node reestimate-price old-redemption-price-node ;; in node's currency
+  let project-local-currency [jurisdiction] of table:get project "project-location"
+  let PI-home-currency [home-jurisdiction] of self
+  let node-currency [node-jurisdiction] of table:get project "relevant-ops-node"
+  if node-currency = "decentralized" [ set node-currency 3 ]
+  let reviewed-redemption-price-node-in-PI-currency convert-currency project-local-currency PI-home-currency reviewed-redemption-price-node
+  
+  ifelse financial-athletics? [
+    let old-redemption-price-PI table:get project "PI-estimated-aiv" ;; in PI's home currency
+    ;; the project investor reassesses the project at completion
+    let reviewed-redemption-price-PI reestimate-price old-redemption-price-PI ;; in PI's home currency
+    let reviewed-redemption-price-PI-in-node-currency convert-currency PI-home-currency node-currency reviewed-redemption-price-PI
+    let expost-aiv-no-anomalies table:get project "expost-aiv-given-no-anomalies" ;; still in project's local currency (function's numerical value)
+    ;; make it in terms of node's currency
+    set expost-aiv-no-anomalies convert-currency project-local-currency node-currency expost-aiv-no-anomalies ;; in node's currency
+    
+    ifelse worth-holding? reviewed-redemption-price-PI reviewed-redemption-price-node-in-PI-currency = false [
+      core.redeem-directly node-currency reviewed-redemption-price-node
+    ][ ;; proj investor would want to hold on to the deposit receipt as a financial security, and declare their estimated aiv as market price
+      let new-deposit-receipt table:make
+      table:put new-deposit-receipt "node-estimated-aiv" reviewed-redemption-price-node ;; in node's currency
+      table:put new-deposit-receipt "current-owner-estimated-aiv" reviewed-redemption-price-PI-in-node-currency ;; in node's currency 
+      table:put new-deposit-receipt "market-price" reviewed-redemption-price-PI-in-node-currency ;; in node's currency
+      table:put new-deposit-receipt "expost-aiv-no-anomalies" expost-aiv-no-anomalies ;; in node's currency
+      table:put new-deposit-receipt "expost-aiv-realized-so-far" 0
+      table:put new-deposit-receipt "current-owner-estimated-aiv-per-year" precision (reviewed-redemption-price-PI-in-node-currency / 75) 2 ;; in node's currency 
+      table:put new-deposit-receipt "node-estimated-aiv-per-year" precision (reviewed-redemption-price-node / 75) 2 ;; in node's currency
+      table:put new-deposit-receipt "expost-aiv-per-year" precision (expost-aiv-no-anomalies / 75) 2 ;; in node's currency
+      table:put new-deposit-receipt "carry-start-date" time:copy TIME-NOW
+      table:put new-deposit-receipt "carry-end-date" time:plus (time:copy TIME-NOW) 75 "years"
+      table:put new-deposit-receipt "owner" self
+      table:put new-deposit-receipt "in-transaction?" false
+      
+      table:put new-deposit-receipt "currency" node-currency
+        
+      RED.prepare-deposit-receipt-for-trading new-deposit-receipt
+      RED.record-node-aiv-history new-deposit-receipt reviewed-redemption-price-node
+        
+      set deposit-receipts fput new-deposit-receipt deposit-receipts
+      set ALL-DEPOSIT-RECEIPTS fput new-deposit-receipt ALL-DEPOSIT-RECEIPTS
+      
+      let market-price-in-PI-currency convert-currency node-currency PI-home-currency table:get new-deposit-receipt "market-price"
+      
+      set ERA-monthly-tax-bill precision ((market-price-in-PI-currency * tax-rate) / 12) 4
+        
+    ]  
+  ][ ;; else financial-athletics is off and proj-investor redeems the deposit receipt immediately
+    core.redeem-directly node-currency reviewed-redemption-price-node
+  ]
+  
+  ;; update project investor ability
+  if ability < 1 [
+    set ability (ability + 0.01)]
+end
+
+to core.update-patch-stats [project]
+;; project investors run this procedure to update (completed) project location soil health
+  let finished-project-location table:get project "project-location"
+  let finished-project-goal-soil-health table:get project "goal-soil-health"
+  ask finished-project-location [
+    set soil-health finished-project-goal-soil-health
+    set proj-counter (proj-counter + 1)
+    set proj-here? false
+    set pcolor scale-color base-color soil-health -200 200
+  ]
+end
+
+to-report worth-holding? [PI-estimated-aiv node-estimated-aiv]
+;; project investors run this to check if the deposit receipt is worth holding on to
+  let cost-of-carry (tax-rate * PI-estimated-aiv) * 75 ;; assuming they pay taxes annually and holds it to term
+  report (PI-estimated-aiv - cost-of-carry) > node-estimated-aiv ;; reports true or false
+end
+
+to-report reestimate-price [old-estimate]
+;; project investors and nodes use this reporter to re-estimate AIV
+  report round (random-normal old-estimate (old-estimate / 4))
+end
+
+to core.redeem-directly [node-currency reviewed-redemption-price-node]
+  ;; add to the PI's holding of the node's currency
+  let node-currency-index node-currency
+  if node-currency = "decentralized" or node-currency = "other" [ set node-currency-index 3 ]
+  
+  add-to-cash-holdings node-currency-index reviewed-redemption-price-node
+  
+  let new-money-in-global-ref-currency convert-currency node-currency-index (global-ref-currency) reviewed-redemption-price-node
+  set TOTAL-AMOUNT-MONEY (TOTAL-AMOUNT-MONEY + new-money-in-global-ref-currency) 
+end
