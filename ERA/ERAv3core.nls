@@ -1,30 +1,29 @@
-to core.soil-degradation
 ;; observer runs this procedure for background soil degradation
+to core.soil-degradation
   ask patches with [soil-health > 1][ 
     set soil-health (soil-health * (1 - soil-degrade-rate jurisdiction))
     set pcolor scale-color base-color soil-health -200 200
     ]
 end
 
+;; this will eventually be "hard-coded"/taking input from dataset based on eco-agro zones
 to-report soil-degrade-rate [jurisdiction-input]
-;; patches use this reporter
-;; this will eventually be "hard-coded"/taking input from dataset based on eco-agro zones 
   (ifelse 
     jurisdiction-input = 0 [
-      report avg-soil-deg-rate - (avg-soil-deg-rate / 2)
+      report 0.01
     ] 
     jurisdiction-input = 1 [
-      report avg-soil-deg-rate + (avg-soil-deg-rate / 2)
+      report 0.02
     ] 
     jurisdiction-input = 2 [
-      report avg-soil-deg-rate
+      report 0.015
     ]
   )
 end
 
-to core.look-for-new-project
 ;; project investors run this procedure to document the characteristics of the potential project (if there is one)
 ;; if there isn't one they move to a new place (randomly for now)
+to core.look-for-new-project
   let bankruptcy-line 0
   if cash >= bankruptcy-line [
     set potential-project core.best-deal-near-me
@@ -42,8 +41,8 @@ to core.look-for-new-project
   ]
 end
 
-to-report core.best-deal-near-me
 ;; project investors try to find the best potential project from a subset of project locations
+to-report core.best-deal-near-me
   let potential-projects patches in-radius 7 with [proj-here? = false 
                                                    and soil-health < calc-optimal-health [ability] of myself]
   if potential-projects = nobody [
@@ -139,18 +138,18 @@ to-report calc-expost-aiv-no-anomalies [old-soil-health new-soil-health]
 end 
 
 
-to core.select-min-redemption-price
 ;; project investors run this procedure to set a minimum aiv they are willing to tolerate
 ;; to be used in their decision making during proposal to the node later
+to core.select-min-redemption-price
   let cost table:get potential-project "project-cost"
   let min-return 1.1
   let min-redemption-price cost * min-return
   table:put potential-project "min-redemption-price" min-redemption-price
 end
 
-to core.choose-ops-node
 ;; project investors run this procedure to choose which operations node they want to transact with
 ;; right now it's assumed the only possibilities are only that of their home country or a decentralized one
+to core.choose-ops-node
   let prob-choose-home-ops-node 80 ;; arbitrary for now
   
   let proj-ops-node ifelse-value (random 100 < prob-choose-home-ops-node) [
@@ -166,9 +165,9 @@ to core.choose-ops-node
   
 end
 
-to core.review-proposals
 ;; operations nodes run this procedure to assess the proposal of project investors who come to them
 ;; within this procedure they estimate their own aiv of the proposed project
+to core.review-proposals
   let relevant-PIs turtle-set [PIs-with-new-projects-for-me] of self
   ask relevant-PIs [
     if potential-project != nobody [
@@ -179,8 +178,8 @@ to core.review-proposals
   set PIs-with-new-projects-for-me (list) ;; if not keeping track, otherwise put in go procedure
 end
 
-to core.node-accept-or-reject [potential-project-table]
 ;; operations nodes run this procedure to make a decision on their proposal assessment
+to core.node-accept-or-reject [potential-project-table]
   let min-redemption-price table:get potential-project-table "min-redemption-price"
   let PI-estimated-aiv table:get potential-project-table "PI-estimated-aiv"
   let node-estimated-aiv round (random-normal PI-estimated-aiv (PI-estimated-aiv / 3)) ;; assumes the estimation is more or less the same
@@ -196,16 +195,16 @@ to core.node-accept-or-reject [potential-project-table]
   )
 end
 
-to core.proj-investor-accept [node-estimated-aiv]
 ;; operations node run this procedure to update the current project list of project investors 
 ;; if they accept the project and the project investor goes through with it
+to core.proj-investor-accept [node-estimated-aiv]
   table:put potential-project "node-estimated-aiv" node-estimated-aiv
   table:put potential-project "do-project?" true
 end
 
-to core.update-project-info
 ;; project investors run this procedure to update project information each tick
-  if potential-project != nobody and potential-project != (list) [
+to core.update-project-info
+  if potential-project != nobody [
     ifelse table:get potential-project "do-project?" [
       set cash (cash - table:get potential-project "project-cost")
       set current-projects fput potential-project current-projects
@@ -218,8 +217,8 @@ to core.update-project-info
   ] 
 end
 
-to core.update-or-complete-projects
 ;; project investors run this procedure to keep track of progress of their current projects
+to core.update-or-complete-project
   let to-delete (list)
   
   foreach current-projects [ proj -> 
@@ -239,49 +238,36 @@ to core.update-or-complete-projects
 end
 
 
-to core.complete-project-and-get-deposit-receipt [project] ;; project is a TABLE  
 ;; project investors run this procedure to get their deposit receipt (and check if they want to cash in immediately)
 ;; the project investors also update their variables like abilty and cash (where applicable)
+to core.complete-project-and-get-deposit-receipt [project] ;; project is a TABLE 
   let old-redemption-price-node table:get project "node-estimated-aiv"
-  ;; the operations node reassesses the project at completion
-  let reviewed-redemption-price-node reestimate-price old-redemption-price-node
+  let old-redemption-price-PI table:get project "PI-estimated-aiv"
+  ;; the project gets reassessed at completion
+  let reviewed-redemption-price-node round (random-normal old-redemption-price-node (old-redemption-price-node / 5))
+  let reviewed-redemption-price-PI round (random-normal old-redemption-price-PI (old-redemption-price-PI / 4))
   
-  ifelse financial-athletics? [
-    let old-redemption-price-PI table:get project "PI-estimated-aiv"
-    ;; the project investor reassesses the project at completion
-    let reviewed-redemption-price-PI reestimate-price old-redemption-price-PI
-    let expost-aiv-no-anomalies table:get project "expost-aiv-given-no-anomalies"
-    
+  let new-deposit-receipt table:make
+  let expost-aiv-no-anomalies table:get project "expost-aiv-given-no-anomalies"
+  
+  ifelse reviewed-redemption-price-node >= reviewed-redemption-price-PI [ ;; proj investor would want to cash in immediately
+    set cash (cash + reviewed-redemption-price-node)
+  ][ 
     ifelse worth-holding? reviewed-redemption-price-PI reviewed-redemption-price-node = false [
       set cash (cash + reviewed-redemption-price-node)
-      set TOTAL-AMOUNT-MONEY TOTAL-AMOUNT-MONEY + reviewed-redemption-price-node
     ][ ;; proj investor would want to hold on to the deposit receipt as a financial security, and declare their estimated aiv as market price
-      let new-deposit-receipt table:make
-      table:put new-deposit-receipt "node-estimated-aiv" reviewed-redemption-price-node
-      table:put new-deposit-receipt "PI-estimated-aiv" reviewed-redemption-price-PI ;; TO DO: change to current owner 
-      table:put new-deposit-receipt "market-price" reviewed-redemption-price-PI ;; proj-investor cannot adjust their declared price for as long as they hold the DR
+      table:put new-deposit-receipt "first-node-estimated-aiv" reviewed-redemption-price-node
+      table:put new-deposit-receipt "first-PI-estimated-aiv" reviewed-redemption-price-PI
+      table:put new-deposit-receipt "current-market-price" reviewed-redemption-price-PI ;; proj-investor cannot adjust their declared price for as long as they hold the DR
       table:put new-deposit-receipt "expost-aiv-no-anomalies" expost-aiv-no-anomalies
-      table:put new-deposit-receipt "expost-aiv-realized-so-far" 0
-      table:put new-deposit-receipt "PI-estimated-aiv-per-year" precision (reviewed-redemption-price-PI / 75) 2 ;; TO DO: change to current owner 
+      table:put new-deposit-receipt "PI-estimated-aiv-per-year" precision (reviewed-redemption-price-PI / 75) 2
       table:put new-deposit-receipt "node-estimated-aiv-per-year" precision (reviewed-redemption-price-node / 75) 2
-      table:put new-deposit-receipt "expost-aiv-per-year" precision (expost-aiv-no-anomalies / 75) 2
+      table:put new-deposit-receipt "expost-no-anomalies-aiv-per-year" precision (expost-aiv-no-anomalies / 75) 2
       table:put new-deposit-receipt "carry-start-date" time:copy TIME-NOW
       table:put new-deposit-receipt "carry-end-date" time:plus (time:copy TIME-NOW) 75 "years"
-      table:put new-deposit-receipt "owner" self
-      table:put new-deposit-receipt "in-transaction?" false
-        
-      RED.prepare-deposit-receipt-for-trading new-deposit-receipt
-      RED.record-node-aiv-history new-deposit-receipt reviewed-redemption-price-node
-        
+      
       set deposit-receipts fput new-deposit-receipt deposit-receipts
-      set ALL-DEPOSIT-RECEIPTS fput new-deposit-receipt ALL-DEPOSIT-RECEIPTS
-        
-      set ERA-monthly-tax-bill precision ((table:get new-deposit-receipt "market-price" * tax-rate) / 12) 4
-        
-    ]  
-  ][ ;; else financial-athletics is off and proj-investor redeems the deposit receipt immediately
-    set cash (cash + reviewed-redemption-price-node)
-    set TOTAL-AMOUNT-MONEY TOTAL-AMOUNT-MONEY + reviewed-redemption-price-node
+    ]
   ]
   
   ;; update project investor ability
@@ -289,8 +275,8 @@ to core.complete-project-and-get-deposit-receipt [project] ;; project is a TABLE
     set ability (ability + 0.01)]
 end
 
-to core.update-patch-stats [project]
 ;; project investors run this procedure to update (completed) project location soil health
+to core.update-patch-stats [project]
   let finished-project-location table:get project "project-location"
   let finished-project-goal-soil-health table:get project "goal-soil-health"
   ask finished-project-location [
@@ -301,13 +287,73 @@ to core.update-patch-stats [project]
   ]
 end
 
-to-report worth-holding? [PI-estimated-aiv node-estimated-aiv]
 ;; project investors run this to check if the deposit receipt is worth holding on to
+to-report worth-holding? [PI-estimated-aiv node-estimated-aiv]
   let cost-of-carry (tax-rate * PI-estimated-aiv) * 75 ;; assuming they pay taxes annually and holds it to term
-  report (PI-estimated-aiv - cost-of-carry) > node-estimated-aiv ;; reports true or false
+  report (PI-estimated-aiv - cost-of-carry) > node-estimated-aiv
 end
 
-to-report reestimate-price [old-estimate]
-;; project investors and nodes use this reporter to re-estimate AIV
-  report round (random-normal old-estimate (old-estimate / 4))
+;; project investors run this procedure to update each of the deposit receipts they're holding
+;; and do their annual reassessment of value and pay annual taxes
+to core.update-deposit-receipts
+  foreach deposit-receipts [ dr ->
+    let carry-start-date table:get dr "carry-start-date"
+    let carry-end-date table:get dr "carry-end-date"
+    table:put dr "time-held" (12 * time:difference-between carry-start-date TIME-NOW "years") + time:difference-between carry-start-date TIME-NOW "months" ;; this is in months overall
+    ;; make reporter, total time diff in months (w 2 dates as input)
+    let time-held table:get dr "time-held"
+    
+    (ifelse 
+      time:is-equal TIME-NOW carry-end-date [
+        core.redeem-deposit-receipt dr table:get dr "expost-aiv-no-anomalies"
+      ] 
+      time-held > 1 and time-held mod 12 = 0 [
+        core.pay-deposit-receipt-tax dr
+        core.reassess-aiv-value dr
+      ]
+    )
+  ]
+end
+
+;; project investors run this procedure to reassess the worth of the deposit receipts they have
+;; and decide if their most profitable action would be redeeming it prematurely
+to core.reassess-aiv-value [deposit-receipt]
+  let years-passed (table:get deposit-receipt "time-held") / 12
+  let PI-per-year-estimate table:get deposit-receipt "PI-estimated-aiv-per-year"
+  let node-per-year-estimate table:get deposit-receipt "node-estimated-aiv-per-year"
+  let expost-per-year table:get deposit-receipt "expost-no-anomalies-aiv-per-year"
+  let time-remaining (75 - years-passed)
+  
+  let expost-aiv-realized (years-passed * expost-per-year)
+  let PI-remaining-aiv-estimate (time-remaining) * PI-per-year-estimate
+  let node-remaining-aiv-estimate (time-remaining) * node-per-year-estimate
+  
+  let current-PI-aiv-estimate precision (expost-aiv-realized + PI-remaining-aiv-estimate) 2
+  let current-node-aiv-estimate precision (expost-aiv-realized + node-remaining-aiv-estimate) 2
+  
+  table:put deposit-receipt "current-PI-estimated-aiv" current-PI-aiv-estimate
+  table:put deposit-receipt "current-node-estimated-aiv" current-node-aiv-estimate
+  
+  let current-market-price table:get deposit-receipt "current-market-price"
+  let cost-of-carry (tax-rate * current-market-price) * (time-remaining)
+ 
+  
+  if current-node-aiv-estimate >= current-market-price ;; market price is proj investor's first (probably higher) estimate
+  or current-node-aiv-estimate >= current-PI-aiv-estimate
+  or (current-PI-aiv-estimate - cost-of-carry) <= current-node-aiv-estimate [
+    core.redeem-deposit-receipt deposit-receipt current-node-aiv-estimate
+  ]
+end
+
+;; project investors run this procedure to redeem a particular deposit receipt they're holding
+to core.redeem-deposit-receipt [deposit-receipt redemption-price]
+  set cash (cash + redemption-price)
+  set deposit-receipts remove deposit-receipt deposit-receipts
+end
+
+;; project investors run this procedure to pay taxes on a deposit receipt
+to core.pay-deposit-receipt-tax [deposit-receipt]
+  let current-market-price table:get deposit-receipt "current-market-price"
+  let annual-tax (current-market-price * tax-rate)
+  set cash (cash - annual-tax)
 end
