@@ -1,240 +1,292 @@
-;I'm basing the first iteration of this model off of a market for clothes; the input firm
-;will be supplying cotton for the consumer firm so the consumer firm can make shirts
-extensions [time table CSV]
+extensions [time table]
 
-__includes ["time-series.nls"]
-
-globals [
+globals[
+  LABOR-MONEY-POT
   WAGE-RATE
-  MARKET-PRICE
+  MARKUP-RULE
+  AVERAGE-LABOR-PRODUCTIVITY
+  UNEMPLOYMENT-RATE
   DATE
-  CURRENT-PRICE-CHANGE-INFO
 ]
 
+breed [input-good-firms input-good-firm]
+breed [consumer-good-firms consumer-good-firm]
+
+;have firms store the kinds of inputs they need
+;have a procedure where they ask for inputs
+
 turtles-own [
+  productivity-of-inputs
+  current-input-stock
+  pending-orders
+  liquid-assets
+]
+
+input-good-firms-own [
   firm-type
-  production-ceiling
-  labor-production
-  estimated-demand-curve
-  marginal-revenue
-  marginal-cost
-  total-revenue
-  marginal-productivity-of-capital ;marginal productivity of capital
-  labor-force-size
-  contract
-  total-cost
-  lifetime-profits ;maybe call lifetime profits
+  quantity-ordered
+]
+
+consumer-good-firms-own[
+  market-share
+  estimated-demand
+  desired-production
+  inventories
+  competitiveness
+  price
+]
+
+links-own [
+  unit-price
+  expiration-date
+  index
 ]
 
 to setup
   clear-all
-  set DATE time:anchor-to-ticks time:create "1972/08/22" 1 "month"
-  if market-type = "PC" [
-    set MARKET-PRICE ts-load "cotton-prices-historical-chart-data.csv"
-    let initial-WAGE-RATE precision (random-normal 3000 250) 2
-    set WAGE-RATE ts-create ["Wage rate"]
-    set WAGE-RATE ts-add-row WAGE-RATE (list DATE initial-WAGE-RATE)
+  set DATE time:anchor-to-ticks time:create "2000/01/01" 1 "months"
+  set WAGE-RATE 100
+  set AVERAGE-LABOR-PRODUCTIVITY 100
+  set MARKUP-RULE 0.2
+  set LABOR-MONEY-POT 0
+  setup-type-1-firms
+  setup-type-2-firms
+  setup-type-3-firms
+  setup-consumer-good-firms
+  ask consumer-good-firms [
+    negotiate-framework-agreement "Input 1"
   ]
-  create-turtles 1 [
-    set shape "truck"
-    setxy -25 0
-    set firm-type "Consumer-good"
-    set production-ceiling round (random-normal 3000 100)
-    set labor-production [quantity -> 2 * (ln (- quantity / (quantity - production-ceiling)) + 5)]
-    if market-type = "PC" [
-      set estimated-demand-curve current-market-price
-      set marginal-revenue current-market-price
-    ]
-    set marginal-cost [quantity -> (- 2 * current-wage-rate * production-ceiling) / (quantity * (quantity - production-ceiling))]
-    set marginal-productivity-of-capital 2
-    set lifetime-profits 0
+  ask input-good-firms with [firm-type = "Input 2" or firm-type = "Input 3"] [
+    negotiate-framework-agreement "Input 1"
   ]
-  create-turtles 1 [
-    set shape "truck"
-    setxy 25 0
-    set firm-type "Input"
-    set production-ceiling (random-normal 5000 150)
-    set labor-production [quantity -> ln (- quantity / (quantity - production-ceiling)) + 5]
-    set marginal-cost [quantity -> (- current-wage-rate * production-ceiling) / (quantity * (quantity - production-ceiling))]
-    set lifetime-profits 0
+  ask input-good-firms with [firm-type = "Input 3"] [
+    negotiate-framework-agreement "Input 2"
   ]
-  negotiate-contract turtle 0 turtle 1
+  ask consumer-good-firms [
+    negotiate-framework-agreement "Input 3"
+  ]
+  estimate-consumer-demand
+  ask consumer-good-firms [order-inputs]
+  ask input-good-firms with [firm-type = "Input 3"] [order-inputs]
+  ask input-good-firms with [firm-type = "Input 2"] [order-inputs]
+  ask input-good-firms with [firm-type = "Input 1"] [order-inputs]
+  calculate-unemployment
+  calculate-alp
+  show UNEMPLOYMENT-RATE
+  show AVERAGE-LABOR-PRODUCTIVITY
   reset-ticks
 end
 
-to negotiate-contract [consumer-firm input-firm]
-  let new-contract table:make
-  let consumer-good-production ideal-production consumer-firm
-  let amount-of-input-needed ceiling (item 1 consumer-good-production / ([marginal-productivity-of-capital] of consumer-firm))
-  let minimum-input-price average-total-cost input-firm amount-of-input-needed
-  let maximum-input-price (current-market-price - ((current-wage-rate * (item 0 consumer-good-production)) / (item 1 consumer-good-production)))
-  if minimum-input-price > maximum-input-price [
-    let difference minimum-input-price - maximum-input-price
-    let num-prices length MARKET-PRICE
-    let current-entry last MARKET-PRICE
-    set current-entry replace-item 1 current-entry (precision (current-market-price + difference + (random-float 5)) 2)
-    set MARKET-PRICE replace-item (num-prices - 1) MARKET-PRICE current-entry
-    set maximum-input-price (current-market-price - ((current-wage-rate * (item 0 consumer-good-production)) / (item 1 consumer-good-production)))
-    ask one-of patches [set pcolor red]
+to setup-type-1-firms
+  create-input-good-firms TYPE-1-INPUT-FIRMS [
+    setxy random-xcor random-ycor
+    set shape "Truck"
+    set color blue
+    set firm-type "Input 1"
+    set liquid-assets 3000
+    set productivity-of-inputs table:make
+    table:put productivity-of-inputs "Labor" (list 150 WAGE-RATE)
+    set current-input-stock table:make
+    set pending-orders table:make
   ]
-  let price-midpoint ((maximum-input-price + minimum-input-price) / 2)
-  let input-price precision ((price-midpoint) + (random (maximum-input-price - price-midpoint)) - (random (maximum-input-price - price-midpoint))) 2
-  table:put new-contract "Parties" (list consumer-firm input-firm)
-  table:put new-contract "Quantity of good" amount-of-input-needed
-  table:put new-contract "Unit-price of good" input-price
-  table:put new-contract "Expiration date" (time:plus DATE 5 "years")
-  ask consumer-firm [
-    set contract new-contract
-    set labor-force-size (item 0 consumer-good-production)
+end
+
+to setup-type-2-firms
+  create-input-good-firms TYPE-2-INPUT-FIRMS [
+    setxy random-xcor random-ycor
+    set shape "Truck"
+    set color red
+    set firm-type "Input 2"
+    set liquid-assets 3000
+    set productivity-of-inputs table:make
+    table:put productivity-of-inputs "Labor" (list 90 WAGE-RATE)
+    table:put productivity-of-inputs "Input 1" (list 2)
+    set current-input-stock table:make
+    set pending-orders table:make
   ]
-  ask input-firm [
-    set contract new-contract
-    set labor-force-size (ceiling (runresult labor-production amount-of-input-needed))
+end
+
+to setup-type-3-firms
+  create-input-good-firms TYPE-3-INPUT-FIRMS [
+    setxy random-xcor random-ycor
+    set shape "Truck"
+    set color yellow
+    set firm-type "Input 3"
+    set liquid-assets 3000
+    set productivity-of-inputs table:make
+    table:put productivity-of-inputs "Labor" (list 40 WAGE-RATE)
+    table:put productivity-of-inputs "Input 2" (list 1.5)
+    table:put productivity-of-inputs "Input 1" (list 3)
+    set current-input-stock table:make
+    set pending-orders table:make
   ]
-  ask one-of patches [set pcolor yellow]
 end
 
-to-report average-total-cost [firm quantity]
-  let amount-of-labor 0
-  ask firm [set amount-of-labor (ceiling (runresult labor-production quantity))]
-  let cost-of-labor amount-of-labor * current-wage-rate
-  report (cost-of-labor / quantity)
+to setup-consumer-good-firms
+  create-consumer-good-firms NUM-CONSUMER-FIRMS [
+    setxy random-xcor random-ycor
+    set shape "Circle"
+    set color white
+    set liquid-assets 3000
+    set productivity-of-inputs table:make
+    table:put productivity-of-inputs "Labor" (list 20 WAGE-RATE)
+    table:put productivity-of-inputs "Input 1" (list 10)
+    table:put productivity-of-inputs "Input 3" (list 0.5)
+    set inventories 0
+    set market-share (1 / NUM-CONSUMER-FIRMS)
+    set current-input-stock table:make
+    set pending-orders table:make
+  ]
 end
 
-to-report current-market-price
-  report 50 * (ts-get MARKET-PRICE DATE " value")
-end
-
-to-report current-wage-rate
-  report last last WAGE-RATE
-end
-
-to-report ideal-production [firm]
-  let mc 100000
-  let production ([production-ceiling] of firm)
-  if market-type = "PC" [
-    while [mc >= current-market-price] [
-      set production (production - 1)
-      ask firm [set mc (runresult marginal-cost production)]
+to negotiate-framework-agreement [seller-type]
+  let current-turtle self
+  let total-seller-firms count input-good-firms with [firm-type  = seller-type]
+  ;make this a fixed number
+  let n-firms ceiling (total-seller-firms / 10)
+  let potential-firms (list)
+  let current-offer (list 1000000 nobody)
+  ask (n-of n-firms input-good-firms with [firm-type = seller-type]) [
+    ;treat this first version of the model as having all goods be infinitely divisible
+    let price-floor get-average-total-cost (get-mp "Labor")
+    let minimum-markup (1 + (random-normal MARKUP-RULE 0.05))
+    if minimum-markup = 1 [set minimum-markup 1.01]
+    let firms-offer ((1 + (random-float MARKUP-RULE)) * minimum-markup * price-floor)
+    if firms-offer < (first current-offer) [
+      set current-offer (list firms-offer self)
+    ]
+    set potential-firms fput (list self (price-floor * minimum-markup) true) potential-firms
+    create-link-to current-turtle [
+      hide-link
     ]
   ]
-  let labor-estimate 0
-  ask firm [set labor-estimate (runresult labor-production production)]
-  ifelse (int labor-estimate) = labor-estimate [
-    report (list labor-estimate production)
-  ][
-    let round-up-target ceiling labor-estimate
-    let round-down-target floor labor-estimate
-    let initial-labor-estimate labor-estimate
-    let initial-production-estimate production
-    while [labor-estimate < round-up-target] [
-      set production production + 1
-      ask firm [set labor-estimate (runresult labor-production production)]
+  let agreement-reached false
+  while [agreement-reached = false] [
+    let offers-changed 0
+    foreach potential-firms [f ->
+      if ((item 0 f) != (last current-offer)) and (last f = true)[
+        let minimum-price item 1 f
+        ifelse first current-offer <= minimum-price [
+          set f replace-item 2 f false
+        ][
+          let difference ((first current-offer) - minimum-price)
+          let current-price (first current-offer)
+          let new-price (current-price - (random-float difference))
+          set current-offer (list new-price (item 0 f))
+          set offers-changed (offers-changed + 1)
+        ]
+      ]
     ]
-    let round-up-production production - 1
-    let round-up-labor-estimate round labor-estimate
-    let round-up-profit ((round-up-production * current-market-price) - (round-up-labor-estimate * current-wage-rate))
-    set production initial-production-estimate
-    while[labor-estimate > round-down-target] [
-      set production production - 1
-        ask firm [set labor-estimate (runresult labor-production production)]
+    if offers-changed = 0 [
+      set agreement-reached true
+      let current-input-info table:get productivity-of-inputs seller-type
+      set current-input-info lput (precision (first current-offer) 2) current-input-info
+      set current-input-info lput (last current-offer) current-input-info
+      table:put productivity-of-inputs seller-type current-input-info
+      ask link-with (last current-offer) [
+        show-link
+        set color green
+        set unit-price (precision (first current-offer) 2)
+        set expiration-date time:plus DATE 5 "years"
+      ]
     ]
-    let round-down-labor-estimate round labor-estimate
-    let round-down-production production
-    let round-down-profit ((round-down-production * current-market-price) - (round-down-labor-estimate * current-wage-rate))
-    ifelse round-down-profit > round-up-profit [
-      report (list round-down-labor-estimate round-down-production)
+  ]
+  ;figure out how to write this procedure and the atc procedure to be generalized across all firms
+  ;not everybody needs to store their offer
+end
+
+to-report get-average-total-cost [quantity]
+  let input-cost-pairs table:values productivity-of-inputs
+  let total-cost 0
+  foreach input-cost-pairs [ p ->
+    let marginal-productivity first p
+    let unit-cost item 1 p
+    let quantity-needed (quantity / marginal-productivity)
+    set total-cost (total-cost + (unit-cost * quantity-needed))
+  ]
+  report (total-cost / quantity)
+end
+
+to-report get-mp [input-type]
+  report first table:get productivity-of-inputs input-type
+end
+
+to estimate-consumer-demand
+  ask consumer-good-firms [
+    ifelse time:is-equal DATE (time:create "1999/12/01")[
+      let aggregate-consumption-estimate ((WAGE-RATE * (random-normal LABOR-FORCE-SIZE 250)) + (0.1 * WAGE-RATE * (random-normal LABOR-FORCE-SIZE 250)))
+      let estimated-market-share (random-normal market-share (0.25 * market-share))
+      if estimated-market-share = 0 [set estimated-market-share (0.5 * (1 / NUM-CONSUMER-FIRMS))]
+      let unit-cost-of-good get-average-total-cost (20)
+      let markup (1 + (random-normal MARKUP-RULE 0.05))
+      if markup <= 1 [set markup 1.01]
+      let price-of-good (unit-cost-of-good * markup)
+      set price price-of-good
+      let estimated-consumption (aggregate-consumption-estimate * estimated-market-share)
+      set estimated-demand ceiling (estimated-consumption / price-of-good)
     ][
-      report (list round-up-labor-estimate round-up-production)
+
     ]
   ]
 end
 
-to go
-  transact
-  tick
+to order-inputs
+  let inputs table:to-list productivity-of-inputs
+  let quantity 0
+  if member? self consumer-good-firms [set quantity (estimated-demand - inventories)]
+  if member? self input-good-firms [set quantity quantity-ordered]
+  foreach inputs [ i ->
+    let data item 1 i
+    let mp first data
+    let unit-cost item 1 data
+    let input-quantity-needed (quantity / mp)
+    ifelse time:is-equal DATE (time:create "1999/12/01") [
+      table:put current-input-stock (first i) input-quantity-needed
+    ][
+      table:put pending-orders (first i) input-quantity-needed
+    ]
+    let total-cost (unit-cost * input-quantity-needed)
+    set liquid-assets (liquid-assets - total-cost)
+    ifelse first i != "Labor" [
+      let other-firm item 2 data
+      ask other-firm [
+        set liquid-assets (liquid-assets + total-cost)
+        set quantity-ordered (quantity-ordered + input-quantity-needed)
+      ]
+    ][
+      set LABOR-MONEY-POT (LABOR-MONEY-POT + total-cost)
+    ]
+  ]
 end
 
-to transact
-  let negotiation-date false
-  ask one-of turtles with [firm-type = "Consumer-good"] [
-    let contract-quantity (table:get contract "Quantity of good" * marginal-productivity-of-capital)
-    let amount-sold round (random-normal contract-quantity (0.02 * contract-quantity))
-    if amount-sold > contract-quantity [set amount-sold contract-quantity]
-    set total-revenue (amount-sold * current-market-price)
-    set total-cost ((labor-force-size * current-wage-rate) + (table:get contract "Unit-price of good" * table:get contract "Quantity of good"))
-    if time:is-equal table:get contract "Expiration date" DATE [set negotiation-date true]
-    set lifetime-profits (lifetime-profits + total-revenue - total-cost)
+to calculate-unemployment
+  let aggregate-employment 0
+  ask turtles [
+    let employed-workers table:get current-input-stock "Labor"
+    set aggregate-employment (aggregate-employment + employed-workers)
   ]
-  ask one-of turtles with [firm-type = "Input"] [
-    let amount-sold table:get contract "Quantity of good"
-    set total-revenue (amount-sold * table:get contract "Unit-price of good")
-    set total-cost (labor-force-size * current-wage-rate)
-    if time:is-equal table:get contract "Expiration date" DATE [set negotiation-date true]
-    set lifetime-profits (lifetime-profits + total-revenue - total-cost)
-  ]
-  let unfavorable-contract? any? turtles with [lifetime-profits < 0]
-  if negotiation-date or unfavorable-contract? [
-    show "renegotiating"
-    negotiate-contract (one-of turtles with [firm-type = "Consumer-good"]) (one-of turtles with [firm-type  = "Input"])
-  ]
+  let employment-rate (aggregate-employment / LABOR-FORCE-SIZE)
+  set UNEMPLOYMENT-RATE (1 - employment-rate)
 end
 
-to test-price
-  tick
+to calculate-alp
+  let total-productivity 0
+  ask turtles [
+    let employed-workers table:get current-input-stock "Labor"
+    let mp-labor get-mp "Labor"
+    set total-productivity (total-productivity + (employed-workers * mp-labor))
+  ]
+  set AVERAGE-LABOR-PRODUCTIVITY (total-productivity / ((1 - UNEMPLOYMENT-RATE) * LABOR-FORCE-SIZE))
 end
-;
-;to-report average-market-price
-;  let price-list butfirst (map [x -> item 1 x] MARKET-PRICE)
-;  report mean price-list
-;end
-;
-;to-report generate-price-change-table
-;  let series-length 0
-;  let goal-price 0
-;  let end-date 0
-;  ifelse length MARKET-PRICE = 1[
-;    set series-length round (random-normal 30 4) ;change name
-;    if series-length < 15 [set series-length 15]
-;    set goal-price (precision (current-market-price * (random-normal 1 0.02)) 2)
-;    set end-date time:plus DATE series-length "months"
-;  ][
-;    set series-length (random 60) + 1
-;    let price-change-factor (random-normal (average-market-price / current-market-price) 0.3)
-;    if price-change-factor < 0.1 [set price-change-factor 0.1]
-;    set goal-price (precision (current-market-price * price-change-factor) 2)
-;    set end-date time:plus DATE series-length "months"
-;  ]
-;  let new-table table:make
-;  table:put new-table "Goal price" goal-price
-;  let average-monthly-change ((goal-price / current-market-price) ^ (1 / series-length))
-;  table:put new-table "Average change" average-monthly-change
-;  table:put new-table "End date" end-date
-;  report new-table
-;end
-;
-;to adjust-market-price
-;  ifelse time:is-equal table:get CURRENT-PRICE-CHANGE-INFO "End date" DATE [
-;    let price table:get CURRENT-PRICE-CHANGE-INFO "Goal price"
-;    set MARKET-PRICE ts-add-row MARKET-PRICE (list DATE price)
-;    set CURRENT-PRICE-CHANGE-INFO generate-price-change-table
-;  ][
-;    let price-change-factor (random-normal (table:get CURRENT-PRICE-CHANGE-INFO "Average change") 0.1)
-;    if price-change-factor < 0.1 [set price-change-factor 0.1]
-;    let price (current-market-price * price-change-factor)
-;    set MARKET-PRICE ts-add-row MARKET-PRICE (list DATE price)
-;  ]
-;end
-
 @#$#@#$#@
 GRAPHICS-WINDOW
-210
-10
-647
-448
+213
+16
+1623
+483
 -1
 -1
-13.0
+13.8812
 1
 10
 1
@@ -244,8 +296,8 @@ GRAPHICS-WINDOW
 1
 1
 1
--16
-16
+-50
+50
 -16
 16
 0
@@ -254,11 +306,86 @@ GRAPHICS-WINDOW
 ticks
 30.0
 
+SLIDER
+10
+17
+197
+50
+TYPE-1-INPUT-FIRMS
+TYPE-1-INPUT-FIRMS
+6
+18
+12.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+10
+50
+197
+83
+TYPE-2-INPUT-FIRMS
+TYPE-2-INPUT-FIRMS
+25
+75
+50.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+10
+83
+197
+116
+TYPE-3-INPUT-FIRMS
+TYPE-3-INPUT-FIRMS
+25
+75
+50.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+10
+115
+197
+148
+NUM-CONSUMER-FIRMS
+NUM-CONSUMER-FIRMS
+100
+300
+200.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+10
+148
+197
+181
+LABOR-FORCE-SIZE
+LABOR-FORCE-SIZE
+2000
+4000
+3000.0
+1
+1
+NIL
+HORIZONTAL
+
 BUTTON
-13
-143
-79
-176
+10
+181
+77
+215
 NIL
 setup
 NIL
@@ -270,51 +397,6 @@ NIL
 NIL
 NIL
 1
-
-BUTTON
-79
-143
-142
-176
-NIL
-go
-T
-1
-T
-OBSERVER
-NIL
-NIL
-NIL
-NIL
-1
-
-PLOT
-8
-303
-188
-453
-Price
-NIL
-NIL
-0.0
-10.0
-0.0
-10.0
-true
-false
-"" ""
-PENS
-"Market-price" 1.0 0 -16777216 true "" "plot current-market-price"
-
-CHOOSER
-11
-10
-183
-55
-market-type
-market-type
-"PC" "MC"
-0
 
 @#$#@#$#@
 ## WHAT IS IT?
