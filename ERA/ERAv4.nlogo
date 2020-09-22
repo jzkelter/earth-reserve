@@ -1,6 +1,6 @@
-__includes ["ERAv3core.nls"]
+__includes ["ERAv4core.nls" "RED_algorithm.nls" "time-series.nls"]
 
-extensions [ table time ]
+extensions [ table time csv ]
 
 breed [ ops-nodes ops-node ]
 breed [ proj-investors proj-investor ]
@@ -10,6 +10,8 @@ globals [
   DECENTRALIZED-OPS-NODES
   NODE-MIN-PROJECT-SIZE
   TIME-NOW
+  ALL-DEPOSIT-RECEIPTS
+  TOTAL-AMOUNT-MONEY
 ]
 
 patches-own [
@@ -28,6 +30,7 @@ proj-investors-own [
   ability              ;; number that represents project investors ability, range 0.1 to 1
   completed-projects   ;; just a number
   deposit-receipts     ;; a list of tables
+  ERA-monthly-tax-bill
 ]
 
 ops-nodes-own [
@@ -41,6 +44,8 @@ to setup
   setup-proj-investors
   setup-patches
   set TIME-NOW time:anchor-to-ticks (time:create "2000-01-01") 1 "month"
+  set ALL-DEPOSIT-RECEIPTS (list)
+  set TOTAL-AMOUNT-MONEY sum [cash] of proj-investors
   reset-ticks
 end
 
@@ -106,7 +111,7 @@ to go
   ]
 
   ask proj-investors [
-    core.update-or-complete-project
+    core.update-or-complete-projects
     core.look-for-new-project
   ]
 
@@ -116,14 +121,31 @@ to go
 
   ask proj-investors [
     core.update-project-info
-    core.update-deposit-receipts
+  ]
+
+  if financial-athletics? [
+    RED.update-deposit-receipts
+    ask proj-investors [
+      RED.pay-deposit-receipt-tax
+      RED.check-auto-node-redeem ;; check if 75 years is up or if latest node estimate > market price
+    ]
+
+    RED.go ALL-DEPOSIT-RECEIPTS
+
+    ask proj-investors [
+      RED.check-if-owner-wants-to-redeem
+    ]
   ]
 
   tick
 end
 
 to-report number-deposit-receipts-in-market
-  report sum [length deposit-receipts] of proj-investors
+  report length ALL-DEPOSIT-RECEIPTS
+end
+
+to-report number-deposit-receipts-owned
+  report [length deposit-receipts] of proj-investors
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
@@ -206,14 +228,14 @@ NIL
 
 SLIDER
 12
-81
+61
 164
-114
+94
 num-proj-investors
 num-proj-investors
 0
 50
-37.0
+50.0
 1
 1
 NIL
@@ -222,27 +244,27 @@ HORIZONTAL
 PLOT
 16
 180
-268
 309
-num projects completed by an investor
+309
+projects completed per investor distribution
 NIL
 NIL
 0.0
 10.0
 0.0
 10.0
-true
 false
-"" "if  min [completed-projects] of proj-investors < max [completed-projects] of proj-investors[\nset-plot-x-range min [completed-projects] of proj-investors max [completed-projects] of proj-investors]"
+false
+"" "if  min [completed-projects] of proj-investors < max [completed-projects] of proj-investors[\nset-plot-x-range min [completed-projects] of proj-investors max [completed-projects] of proj-investors]\n\n\n"
 PENS
 "default" 1.0 1 -16777216 true "" "histogram [completed-projects] of proj-investors\n"
 
 PLOT
 16
 316
-269
+310
 460
-num projects completed on a patch
+projects completed per patch distribution
 NIL
 NIL
 0.0
@@ -256,10 +278,10 @@ PENS
 "default" 1.0 1 -16777216 true "" "histogram [proj-counter] of patches"
 
 SLIDER
-179
-63
-317
-96
+396
+465
+534
+498
 c0
 c0
 0
@@ -271,10 +293,10 @@ NIL
 HORIZONTAL
 
 SLIDER
-179
-100
-316
-133
+396
+502
+533
+535
 c1
 c1
 300
@@ -286,10 +308,10 @@ NIL
 HORIZONTAL
 
 SLIDER
-179
-138
-316
-171
+396
+540
+533
+573
 c2
 c2
 0
@@ -301,10 +323,10 @@ NIL
 HORIZONTAL
 
 PLOT
-789
-17
-1041
-155
+788
+10
+1040
+142
 distribution of health of patches
 NIL
 NIL
@@ -320,25 +342,25 @@ PENS
 
 SLIDER
 12
-117
+97
 164
-150
+130
 tax-rate
 tax-rate
 0
 0.05
-0.0058
+0.0055
 0.0001
 1
 NIL
 HORIZONTAL
 
 PLOT
-789
-168
-1044
-318
-num deposit receipts in market
+792
+297
+1047
+447
+num DRs in market over time
 NIL
 NIL
 0.0
@@ -353,10 +375,10 @@ PENS
 
 PLOT
 789
-329
+148
 1046
-479
-average eco health over time
+289
+average soil health over time
 NIL
 NIL
 0.0
@@ -368,6 +390,105 @@ false
 "" ""
 PENS
 "default" 1.0 0 -16777216 true "" "plot mean [soil-health] of patches"
+
+MONITOR
+635
+459
+763
+504
+total deposit receipts
+length ALL-DEPOSIT-RECEIPTS
+17
+1
+11
+
+SWITCH
+12
+138
+168
+171
+financial-athletics?
+financial-athletics?
+0
+1
+-1000
+
+PLOT
+790
+452
+1048
+602
+deposit receipts per PI distribution
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" "if min number-deposit-receipts-owned < max number-deposit-receipts-owned[\nset-plot-x-range 0 max number-deposit-receipts-owned]"
+PENS
+"default" 1.0 1 -16777216 true "" "histogram number-deposit-receipts-owned"
+
+PLOT
+16
+467
+384
+608
+total money in system over time
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+true
+"" ""
+PENS
+"total money" 1.0 0 -16777216 true "" "plot TOTAL-AMOUNT-MONEY"
+"total PI money" 1.0 0 -13840069 true "" "plot sum [cash] of proj-investors"
+
+TEXTBOX
+545
+525
+730
+572
+These constants control the functions that relate rent, soil health, and PI investment.\n
+11
+0.0
+1
+
+SLIDER
+173
+62
+316
+95
+avg-soil-deg-rate
+avg-soil-deg-rate
+0
+0.1
+0.02
+0.001
+1
+NIL
+HORIZONTAL
+
+SLIDER
+173
+100
+318
+133
+n-drs-checked
+n-drs-checked
+0
+20
+17.0
+1
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
