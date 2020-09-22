@@ -1,6 +1,6 @@
-__includes ["ERAv3core.nls"]
+__includes [ "ERAv4core.nls" "RED.nls" "time-series.nls" "ERi.nls" ]
 
-extensions [ table time ]
+extensions [ table time csv ]
 
 breed [ ops-nodes ops-node ]
 breed [ proj-investors proj-investor ]
@@ -10,6 +10,11 @@ globals [
   DECENTRALIZED-OPS-NODES
   NODE-MIN-PROJECT-SIZE
   TIME-NOW
+  ALL-DEPOSIT-RECEIPTS
+  TOTAL-AMOUNT-MONEY
+  ERiC
+  BASE-YEAR-EXCHANGE-RATES
+  CURRENT-EXCHANGE-RATES
 ]
 
 patches-own [
@@ -18,6 +23,7 @@ patches-own [
   proj-counter
   proj-here?
   base-color     ;; based on nearest centralized operations node
+  ecoregion
 ]
 
 proj-investors-own [
@@ -28,6 +34,7 @@ proj-investors-own [
   ability              ;; number that represents project investors ability, range 0.1 to 1
   completed-projects   ;; just a number
   deposit-receipts     ;; a list of tables
+  ERA-monthly-tax-bill
 ]
 
 ops-nodes-own [
@@ -41,7 +48,20 @@ to setup
   setup-proj-investors
   setup-patches
   set TIME-NOW time:anchor-to-ticks (time:create "2000-01-01") 1 "month"
+  set ALL-DEPOSIT-RECEIPTS (list)
+  setup-base-yr-exch-rate
+  set CURRENT-EXCHANGE-RATES map copy-table BASE-YEAR-EXCHANGE-RATES ;; because ERiCs aren't changing right now
+  setup-ERiC
+  set TOTAL-AMOUNT-MONEY sum [PI-total-cash-held-in-ref global-ref-currency] of proj-investors
   reset-ticks
+end
+
+to-report copy-table [ orig ]
+  let copy table:make
+  foreach ( table:keys orig ) [
+    [key] -> table:put copy key ( table:get orig key )
+  ]
+  report copy
 end
 
 to setup-ops-nodes
@@ -78,7 +98,7 @@ to setup-proj-investors
     set size 2
     setxy random-xcor random-ycor
     set home-jurisdiction [node-jurisdiction] of min-one-of CENTRALIZED-OPS-NODES [distance myself]
-    set cash round random-normal 100 25
+    setup-proj-investor-cash
     set ability precision (random-normal 0.7 0.25) 2
     if ability > 1 [set ability 1]
     if ability < 0.1 [set ability 0.1]
@@ -88,25 +108,112 @@ to setup-proj-investors
   ]
 end
 
+to setup-proj-investor-cash
+  let cash-table table:make
+  table:put cash-table "0" 0
+  table:put cash-table "1" 0
+  table:put cash-table "2" 0
+  table:put cash-table "other" 0
+  (ifelse
+    home-jurisdiction = 0 [
+      table:put cash-table "0" round random-normal 100 25
+    ]
+    home-jurisdiction = 1 [
+      table:put cash-table "1" round random-normal 100 25
+    ]
+    home-jurisdiction = 2 [
+      table:put cash-table "2" round random-normal 100 25
+    ]
+  )
+  set cash cash-table
+end
+
 to setup-patches
+  let ecoregion-boundary-1 random (world-height / 2)
+  let ecoregion-boundary-2 random (world-height / 2)
   ask patches [
     set soil-health (1 + random 100)
     set jurisdiction [node-jurisdiction] of min-one-of CENTRALIZED-OPS-NODES [distance myself]
     set base-color [color] of one-of CENTRALIZED-OPS-NODES with [who = [jurisdiction] of myself]
     set pcolor scale-color base-color soil-health -200 200
     set proj-here? false
+    (ifelse
+      pycor <= min-pycor + ecoregion-boundary-1 [
+        set ecoregion "A"
+      ]
+      pycor >= max-pycor - ecoregion-boundary-2 [
+        set ecoregion "C"
+      ][ ;; else
+        set ecoregion "B"
+      ]
+    )
+  ]
+  ask patches with [ecoregion = "A"][
+    sprout 1 [
+      set color 3
+      set shape "x"
+      stamp
+      die
+    ]
+  ]
+  ask patches with [ecoregion = "C"][
+    sprout 1 [
+      set color 3
+      set shape "dot"
+      stamp
+      die
+    ]
   ]
 end
 
-;; climate characteristics of patch (for later)
+to setup-ERiC
+  let eric-table table:make
+  table:put eric-table "ERiC 0" 1.2
+  table:put eric-table "ERiC 1" 0.8
+  table:put eric-table "ERiC 2" 1.5
+  table:put eric-table "ERiC other" 1
+  set ERiC eric-table
+end
+
+to setup-base-yr-exch-rate
+  let exch-rate-0 table:make
+  table:put exch-rate-0 "0" 1
+  table:put exch-rate-0 "1" 3
+  table:put exch-rate-0 "2" 0.8
+  table:put exch-rate-0 "other" 1.2
+
+  let exch-rate-1 table:make
+  table:put exch-rate-1 "0" 0.67
+  table:put exch-rate-1 "1" 1
+  table:put exch-rate-1 "2" 2
+  table:put exch-rate-1 "other" 1.8
+
+  let exch-rate-2 table:make
+  table:put exch-rate-2 "0" 1.25
+  table:put exch-rate-2 "1" 0.5
+  table:put exch-rate-2 "2" 1
+  table:put exch-rate-2 "other" 1.6
+
+  let exch-rate-other table:make
+  table:put exch-rate-other "0" 0.83
+  table:put exch-rate-other "1" 0.56
+  table:put exch-rate-other "2" 0.625
+  table:put exch-rate-other "other" 1
+
+  set BASE-YEAR-EXCHANGE-RATES (list exch-rate-0 exch-rate-1 exch-rate-2 exch-rate-other)
+end
+
+
 
 to go
   if (ticks > 0 and ticks mod 10 = 0) [
     core.soil-degradation
   ]
 
+  ERi.recalculate-exchange-rates
+
   ask proj-investors [
-    core.update-or-complete-project
+    core.update-or-complete-projects
     core.look-for-new-project
   ]
 
@@ -116,14 +223,46 @@ to go
 
   ask proj-investors [
     core.update-project-info
-    core.update-deposit-receipts
+  ]
+
+  if financial-athletics? [
+    RED.update-deposit-receipts
+    ask proj-investors [
+      RED.pay-deposit-receipt-tax
+      RED.check-auto-node-redeem ;; check if 75 years is up or if latest node estimate > market price
+    ]
+
+    RED.go ALL-DEPOSIT-RECEIPTS
+
+    ask proj-investors [
+      RED.check-if-owner-wants-to-redeem
+    ]
   ]
 
   tick
 end
 
 to-report number-deposit-receipts-in-market
-  report sum [length deposit-receipts] of proj-investors
+  report length ALL-DEPOSIT-RECEIPTS
+end
+
+to-report number-deposit-receipts-owned
+  report [length deposit-receipts] of proj-investors
+end
+
+to-report PI-total-cash-held-in-ref [ref-currency] ;; takes number (not string) as input
+  let currency-0-held table:get cash "0"
+  let currency-1-held table:get cash "1"
+  let currency-2-held table:get cash "2"
+  let currency-other-held table:get cash "other"
+
+  let currency-0-held-in-ref convert-currency 0 ref-currency currency-0-held
+  let currency-1-held-in-ref convert-currency 1 ref-currency currency-1-held
+  let currency-2-held-in-ref convert-currency 2 ref-currency currency-2-held
+  let currency-other-held-in-ref convert-currency "other" ref-currency currency-other-held
+
+  let total-cash-held-in-ref (currency-0-held-in-ref + currency-1-held-in-ref + currency-2-held-in-ref + currency-other-held-in-ref)
+  report precision total-cash-held-in-ref 4
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
@@ -206,14 +345,14 @@ NIL
 
 SLIDER
 12
-81
+61
 164
-114
+94
 num-proj-investors
 num-proj-investors
 0
 50
-37.0
+50.0
 1
 1
 NIL
@@ -222,27 +361,27 @@ HORIZONTAL
 PLOT
 16
 180
-268
 309
-num projects completed by an investor
+309
+projects completed per investor distribution
 NIL
 NIL
 0.0
 10.0
 0.0
 10.0
-true
 false
-"" "if  min [completed-projects] of proj-investors < max [completed-projects] of proj-investors[\nset-plot-x-range min [completed-projects] of proj-investors max [completed-projects] of proj-investors]"
+false
+"" "if  min [completed-projects] of proj-investors < max [completed-projects] of proj-investors[\nset-plot-x-range min [completed-projects] of proj-investors max [completed-projects] of proj-investors]\n\n\n"
 PENS
 "default" 1.0 1 -16777216 true "" "histogram [completed-projects] of proj-investors\n"
 
 PLOT
 16
 316
-269
+310
 460
-num projects completed on a patch
+projects completed per patch distribution
 NIL
 NIL
 0.0
@@ -256,25 +395,25 @@ PENS
 "default" 1.0 1 -16777216 true "" "histogram [proj-counter] of patches"
 
 SLIDER
-179
-63
-317
-96
+396
+465
+534
+498
 c0
 c0
 0
 100
-15.0
+50.0
 1
 1
 NIL
 HORIZONTAL
 
 SLIDER
-179
-100
-316
-133
+396
+502
+533
+535
 c1
 c1
 300
@@ -286,10 +425,10 @@ NIL
 HORIZONTAL
 
 SLIDER
-179
-138
-316
-171
+396
+540
+533
+573
 c2
 c2
 0
@@ -301,11 +440,11 @@ NIL
 HORIZONTAL
 
 PLOT
-789
-17
-1041
-155
-distribution of health of patches
+788
+10
+1040
+142
+distribution of soil health of patches
 NIL
 NIL
 0.0
@@ -320,25 +459,25 @@ PENS
 
 SLIDER
 12
-117
+97
 164
-150
+130
 tax-rate
 tax-rate
 0
 0.05
-0.0058
+0.0055
 0.0001
 1
 NIL
 HORIZONTAL
 
 PLOT
-789
-168
-1044
-318
-num deposit receipts in market
+792
+297
+1047
+447
+num DRs in market over time
 NIL
 NIL
 0.0
@@ -353,10 +492,10 @@ PENS
 
 PLOT
 789
-329
+148
 1046
-479
-average eco health over time
+289
+average soil health over time
 NIL
 NIL
 0.0
@@ -368,6 +507,115 @@ false
 "" ""
 PENS
 "default" 1.0 0 -16777216 true "" "plot mean [soil-health] of patches"
+
+MONITOR
+635
+459
+763
+504
+total deposit receipts
+length ALL-DEPOSIT-RECEIPTS
+17
+1
+11
+
+SWITCH
+12
+138
+168
+171
+financial-athletics?
+financial-athletics?
+0
+1
+-1000
+
+PLOT
+790
+452
+1048
+602
+deposit receipts per PI distribution
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" "if min number-deposit-receipts-owned < max number-deposit-receipts-owned[\nset-plot-x-range 0 max number-deposit-receipts-owned]"
+PENS
+"default" 1.0 1 -16777216 true "" "histogram number-deposit-receipts-owned"
+
+PLOT
+16
+467
+384
+608
+total money in system over time (in ref currency)
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+true
+"" ""
+PENS
+"total money" 1.0 0 -16777216 true "" "plot TOTAL-AMOUNT-MONEY"
+"total PI money" 1.0 0 -13840069 true "" "plot sum [PI-total-cash-held-in-ref global-ref-currency] of proj-investors"
+
+TEXTBOX
+545
+525
+730
+572
+These constants control the functions that relate rent, soil health, and PI investment.\n
+11
+0.0
+1
+
+SLIDER
+173
+62
+316
+95
+avg-soil-deg-rate
+avg-soil-deg-rate
+0
+0.1
+0.02
+0.001
+1
+NIL
+HORIZONTAL
+
+SLIDER
+173
+100
+318
+133
+n-drs-checked
+n-drs-checked
+0
+20
+17.0
+1
+1
+NIL
+HORIZONTAL
+
+CHOOSER
+174
+136
+317
+181
+global-ref-currency
+global-ref-currency
+0 1 2 3
+0
 
 @#$#@#$#@
 ## WHAT IS IT?
