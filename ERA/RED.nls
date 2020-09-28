@@ -179,7 +179,7 @@ to RED.transact [dep-receipts] ;; takes all-deposit-receipts as input, a list of
     let new-owner-aiv-estimate item 3 best-profit-dr ;; in node's currency
     if (item 2 best-profit-dr) / current-price > min-roi-wanted [
       let node-currency table:get dr "currency"
-      let owner-home-currency [home-jurisdiction] of current-turtle
+      let owner-home-currency [home-currency] of current-turtle
       subtract-from-cash-holdings node-currency current-price
       
       let monthly-tax-for-new-owner precision ((new-owner-aiv-estimate * tax-rate) / 12) 4 ;; in node's currency
@@ -192,7 +192,7 @@ to RED.transact [dep-receipts] ;; takes all-deposit-receipts as input, a list of
         add-to-cash-holdings node-currency current-price
         
         let monthly-tax-for-old-owner precision ((table:get dr "market-price" * tax-rate) / 12) 4
-        let monthly-tax-for-old-owner-in-own-currency convert-currency node-currency [home-jurisdiction] of table:get dr "owner" monthly-tax-for-old-owner
+        let monthly-tax-for-old-owner-in-own-currency convert-currency node-currency [home-currency] of table:get dr "owner" monthly-tax-for-old-owner
         set ERA-monthly-tax-bill (ERA-monthly-tax-bill - monthly-tax-for-old-owner-in-own-currency) ;; in old owner's home currency
         if ERA-monthly-tax-bill < 0 [ set ERA-monthly-tax-bill 0 ]
         set deposit-receipts remove dr deposit-receipts
@@ -216,7 +216,7 @@ to RED.redeem-deposit-receipt [deposit-receipt redemption-price]
   add-to-cash-holdings node-currency redemption-price
   
   let monthly-tax-on-dr precision ((table:get deposit-receipt "market-price" * tax-rate) / 12) 4
-  let monthly-tax-on-dr-in-own-currency convert-currency node-currency [home-jurisdiction] of table:get deposit-receipt "owner" monthly-tax-on-dr
+  let monthly-tax-on-dr-in-own-currency convert-currency node-currency [home-currency] of table:get deposit-receipt "owner" monthly-tax-on-dr
   set ERA-monthly-tax-bill (ERA-monthly-tax-bill - monthly-tax-on-dr-in-own-currency)
   if ERA-monthly-tax-bill < 0 [ set ERA-monthly-tax-bill 0 ]
   set deposit-receipts remove deposit-receipt deposit-receipts
@@ -228,5 +228,5 @@ end
 
 to RED.pay-deposit-receipt-tax 
 ;; project investors run this procedure to pay taxes each tick (month)
-  subtract-from-cash-holdings home-jurisdiction ERA-monthly-tax-bill
+  subtract-from-cash-holdings home-currency ERA-monthly-tax-bill
 end
