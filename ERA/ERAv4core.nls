@@ -26,7 +26,7 @@ to core.look-for-new-project
 ;; project investors run this procedure to document the characteristics of the potential project (if there is one)
 ;; if there isn't one they move to a new place (randomly for now)
   let bankruptcy-line 0
-  if PI-total-cash-held-in-ref home-jurisdiction >= bankruptcy-line [
+  if PI-total-cash-held-in-ref home-currency >= bankruptcy-line [
     set potential-project core.best-deal-near-me
     
     ifelse potential-project != nobody [    
@@ -57,24 +57,24 @@ to-report core.best-deal-near-me
     
   ask potential-projects [
     let estimated-cost calc-estimated-cost self calc-optimal-health (PI-ability) PI-ability ;; in "local" currency (numeric output)
-    let estimated-cost-in-home-currency convert-currency [jurisdiction] of self [home-jurisdiction] of myself estimated-cost
+    let estimated-cost-in-home-currency convert-currency [local-currency] of self [home-currency] of myself estimated-cost
     
     let PI-total-cash-in-local-currency 0
     
     ask myself [ ;; because this thing inside can only be called by a PI, not a patch
-      set PI-total-cash-in-local-currency PI-total-cash-held-in-ref [jurisdiction] of myself ;; total cash of PI in terms of local currency
+      set PI-total-cash-in-local-currency PI-total-cash-held-in-ref [local-currency] of myself ;; total cash of PI in terms of local currency
     ]
     
     ;; if the project investor cannot afford raising the health all the way to optimal, they do the same project but just invest everything they have (in all currencies)
     if estimated-cost > PI-total-cash-in-local-currency [
       set estimated-cost PI-total-cash-in-local-currency
-      set estimated-cost-in-home-currency convert-currency [jurisdiction] of self [home-jurisdiction] of myself estimated-cost
+      set estimated-cost-in-home-currency convert-currency [local-currency] of self [home-currency] of myself estimated-cost
     ]
 
     let soil-health-given-investment calc-new-soil-health-given-investment PI-ability estimated-cost [soil-health] of self
     
     let estimated-aiv calc-estimated-aiv self soil-health-given-investment ;; in "local" currency (numeric output)
-    let estimated-aiv-in-home-currency convert-currency [jurisdiction] of self [home-jurisdiction] of myself estimated-aiv
+    let estimated-aiv-in-home-currency convert-currency [local-currency] of self [home-currency] of myself estimated-aiv
     
     let estimated-profit (estimated-aiv - estimated-cost)
     
@@ -95,7 +95,7 @@ to-report core.best-deal-near-me
     table:put potential-project-table "project-cost" item 2 best-potential-project-data ;; in PI's home currency
     table:put potential-project-table "goal-soil-health" item 3 best-potential-project-data
     table:put potential-project-table "expost-aiv-given-no-anomalies" calc-expost-aiv-no-anomalies (table:get potential-project-table "current-soil-health") (table:get potential-project-table "goal-soil-health") ;; still numerical value (in project's local currency)
-    table:put potential-project-table "currency" [jurisdiction] of table:get potential-project-table "project-location" ;; is a number, not string
+    table:put potential-project-table "currency" [local-currency] of table:get potential-project-table "project-location" ;; is a number, not string -- now name of currency
     
     set expected-roi (table:get potential-project-table "PI-estimated-aiv" - table:get potential-project-table "project-cost") / table:get potential-project-table "project-cost"
   ]
@@ -195,9 +195,8 @@ to core.node-accept-or-reject [potential-project-table]
   let PI-estimated-aiv table:get potential-project-table "PI-estimated-aiv" ;; in the PI's home currency
   
   let node-estimated-aiv round (random-normal PI-estimated-aiv (PI-estimated-aiv / 3)) ;; assumes the estimation is more or less the same, in PI's home currency
-  let node-currency [jurisdiction] of table:get potential-project-table "relevant-ops-node"
-  if node-currency = "decentralized" [ set node-currency 3 ] 
-  let node-estimated-aiv-in-node-currency convert-currency [home-jurisdiction] of self node-currency node-estimated-aiv
+  let node-currency [ops-node-currency] of table:get potential-project-table "relevant-ops-node"
+  let node-estimated-aiv-in-node-currency convert-currency [home-currency] of self node-currency node-estimated-aiv
   
   (ifelse 
     node-estimated-aiv-in-node-currency < NODE-MIN-PROJECT-SIZE [ ;; potential project was already filtered for it? but there's a chance the node estimation is lower
@@ -221,9 +220,8 @@ to core.update-project-info ;; maybe name needs a change
 ;; project investors run this procedure to update info related to undertaking a new project
   if potential-project != nobody and potential-project != (list) [
     ifelse table:get potential-project "do-project?" [
-      let currency-index-to-change home-jurisdiction
       
-      subtract-from-cash-holdings currency-index-to-change table:get potential-project "project-cost"
+      subtract-from-cash-holdings home-currency table:get potential-project "project-cost"
       
       set current-projects fput potential-project current-projects
     ][
@@ -262,10 +260,9 @@ to core.complete-project-and-get-deposit-receipt [project] ;; project is a TABLE
   let old-redemption-price-node table:get project "node-estimated-aiv" ;; in node's currency
   ;; the operations node reassesses the project at completion
   let reviewed-redemption-price-node reestimate-price old-redemption-price-node ;; in node's currency
-  let project-local-currency [jurisdiction] of table:get project "project-location"
-  let PI-home-currency [home-jurisdiction] of self
-  let node-currency [node-jurisdiction] of table:get project "relevant-ops-node"
-  if node-currency = "decentralized" [ set node-currency 3 ]
+  let project-local-currency [local-currency] of table:get project "project-location"
+  let PI-home-currency [home-currency] of self
+  let node-currency [ops-node-currency] of table:get project "relevant-ops-node"
   let reviewed-redemption-price-node-in-PI-currency convert-currency project-local-currency PI-home-currency reviewed-redemption-price-node
   
   ifelse financial-athletics? [
@@ -339,13 +336,10 @@ to-report reestimate-price [old-estimate]
   report round (random-normal old-estimate (old-estimate / 4))
 end
 
-to core.redeem-directly [node-currency reviewed-redemption-price-node]
-  ;; add to the PI's holding of the node's currency
-  let node-currency-index node-currency
-  if node-currency = "decentralized" or node-currency = "other" [ set node-currency-index 3 ]
+to core.redeem-directly [node-currency reviewed-redemption-price-node] ;; node currency is name like "c0"
   
-  add-to-cash-holdings node-currency-index reviewed-redemption-price-node
+  add-to-cash-holdings node-currency reviewed-redemption-price-node
   
-  let new-money-in-global-ref-currency convert-currency node-currency-index (global-ref-currency) reviewed-redemption-price-node
+  let new-money-in-global-ref-currency convert-currency node-currency (global-ref-currency) reviewed-redemption-price-node
   set TOTAL-AMOUNT-MONEY (TOTAL-AMOUNT-MONEY + new-money-in-global-ref-currency) 
 end
