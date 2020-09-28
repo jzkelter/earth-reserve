@@ -12,7 +12,8 @@ globals [
   TIME-NOW
   ALL-DEPOSIT-RECEIPTS
   TOTAL-AMOUNT-MONEY
-  ERiC
+  CURRENCY-LIST
+  ERiCs
   BASE-YEAR-EXCHANGE-RATES
   CURRENT-EXCHANGE-RATES
 ]
@@ -24,10 +25,12 @@ patches-own [
   proj-here?
   base-color     ;; based on nearest centralized operations node
   ecoregion
+  local-currency
 ]
 
 proj-investors-own [
   home-jurisdiction
+  home-currency
   cash
   potential-project    ;; a table that starts out empty every tick
   current-projects     ;; a list of tables
@@ -40,18 +43,20 @@ proj-investors-own [
 ops-nodes-own [
   node-jurisdiction
   PIs-with-new-projects-for-me  ;; a new list of turtles every tick
+  ops-node-currency
 ]
 
 to setup
   clear-all
+  setup-currencies
   setup-ops-nodes
   setup-proj-investors
   setup-patches
   set TIME-NOW time:anchor-to-ticks (time:create "2000-01-01") 1 "month"
   set ALL-DEPOSIT-RECEIPTS (list)
   setup-base-yr-exch-rate
-  set CURRENT-EXCHANGE-RATES map copy-table BASE-YEAR-EXCHANGE-RATES ;; because ERiCs aren't changing right now
-  setup-ERiC
+  set CURRENT-EXCHANGE-RATES copy-table BASE-YEAR-EXCHANGE-RATES ;; because ERiCs aren't changing right now
+  setup-ERiCs
   set TOTAL-AMOUNT-MONEY sum [PI-total-cash-held-in-ref global-ref-currency] of proj-investors
   reset-ticks
 end
@@ -65,22 +70,24 @@ to-report copy-table [ orig ]
 end
 
 to setup-ops-nodes
-  foreach n-of 3 base-colors [ c ->   ;; 3 is placeholder for number of jurisdictions
+  foreach n-of num-centralized-currencies base-colors [ c ->   ;; 3 is placeholder for number of jurisdictions
     ask one-of patches [
       sprout-ops-nodes 1 [
         set color c
         set shape "Circle (2)"
         set size 2
         set node-jurisdiction [who] of self
+        set ops-node-currency item node-jurisdiction CURRENCY-LIST
       ]
     ]
   ]
-  create-ops-nodes 1 [  ;; this is standing in for the decentralized ops-node (like cryptos)
+  create-ops-nodes num-decentralized-currencies [  ;; this is standing in for the decentralized ops-node (like cryptos)
     set color white
     set shape "Circle (2)"
     set size 2
     setxy random-xcor random-ycor
     set node-jurisdiction "decentralized"
+    set ops-node-currency item ([who] of self) CURRENCY-LIST
   ]
   ask ops-nodes [
     set PIs-with-new-projects-for-me (list)
@@ -98,6 +105,7 @@ to setup-proj-investors
     set size 2
     setxy random-xcor random-ycor
     set home-jurisdiction [node-jurisdiction] of min-one-of CENTRALIZED-OPS-NODES [distance myself]
+    set home-currency [ops-node-currency] of min-one-of CENTRALIZED-OPS-NODES [distance myself]
     setup-proj-investor-cash
     set ability precision (random-normal 0.7 0.25) 2
     if ability > 1 [set ability 1]
@@ -108,23 +116,25 @@ to setup-proj-investors
   ]
 end
 
+to setup-currencies
+  let current-list (list)
+  let possible-centralized (list "c0" "c1" "c2" "c3" "c4" "c5" "c6" "c7" "c8" "c9" "c10")
+  let possible-decentralized (list "d0" "d1" "d2" "d3" "d4" "d5" "d6" "d7" "d8" "d9" "d10")
+  foreach n-values num-centralized-currencies [i -> i] [ i ->
+    set current-list lput (item i possible-centralized) current-list
+  ]
+  foreach n-values num-decentralized-currencies [i -> i] [ i ->
+    set current-list lput (item i possible-decentralized) current-list
+  ]
+  set CURRENCY-LIST current-list
+end
+
 to setup-proj-investor-cash
   let cash-table table:make
-  table:put cash-table "0" 0
-  table:put cash-table "1" 0
-  table:put cash-table "2" 0
-  table:put cash-table "other" 0
-  (ifelse
-    home-jurisdiction = 0 [
-      table:put cash-table "0" round random-normal 100 25
-    ]
-    home-jurisdiction = 1 [
-      table:put cash-table "1" round random-normal 100 25
-    ]
-    home-jurisdiction = 2 [
-      table:put cash-table "2" round random-normal 100 25
-    ]
-  )
+
+  foreach CURRENCY-LIST [currency-name ->
+    table:put cash-table currency-name round random-normal 100 25
+  ]
   set cash cash-table
 end
 
@@ -134,6 +144,7 @@ to setup-patches
   ask patches [
     set soil-health (1 + random 100)
     set jurisdiction [node-jurisdiction] of min-one-of CENTRALIZED-OPS-NODES [distance myself]
+    set local-currency [ops-node-currency] of min-one-of CENTRALIZED-OPS-NODES [distance myself]
     set base-color [color] of one-of CENTRALIZED-OPS-NODES with [who = [jurisdiction] of myself]
     set pcolor scale-color base-color soil-health -200 200
     set proj-here? false
@@ -166,41 +177,27 @@ to setup-patches
   ]
 end
 
-to setup-ERiC
+to setup-ERiCs
   let eric-table table:make
-  table:put eric-table "ERiC 0" 1.2
-  table:put eric-table "ERiC 1" 0.8
-  table:put eric-table "ERiC 2" 1.5
-  table:put eric-table "ERiC other" 1
-  set ERiC eric-table
+
+  foreach CURRENCY-LIST [ currency-name ->
+    table:put eric-table currency-name precision ((random-float 2) + 0.3) 2
+  ]
+  set ERiCs eric-table
 end
 
 to setup-base-yr-exch-rate
-  let exch-rate-0 table:make
-  table:put exch-rate-0 "0" 1
-  table:put exch-rate-0 "1" 3
-  table:put exch-rate-0 "2" 0.8
-  table:put exch-rate-0 "other" 1.2
+  let exch-rate-c0 table:make
 
-  let exch-rate-1 table:make
-  table:put exch-rate-1 "0" 0.67
-  table:put exch-rate-1 "1" 1
-  table:put exch-rate-1 "2" 2
-  table:put exch-rate-1 "other" 1.8
+  foreach CURRENCY-LIST [ currency-name ->
+    ifelse currency-name = "c0" [
+      table:put exch-rate-c0 currency-name 1
+    ][
+      table:put exch-rate-c0 currency-name precision (random-normal 2 0.5) 2
+    ]
+  ]
 
-  let exch-rate-2 table:make
-  table:put exch-rate-2 "0" 1.25
-  table:put exch-rate-2 "1" 0.5
-  table:put exch-rate-2 "2" 1
-  table:put exch-rate-2 "other" 1.6
-
-  let exch-rate-other table:make
-  table:put exch-rate-other "0" 0.83
-  table:put exch-rate-other "1" 0.56
-  table:put exch-rate-other "2" 0.625
-  table:put exch-rate-other "other" 1
-
-  set BASE-YEAR-EXCHANGE-RATES (list exch-rate-0 exch-rate-1 exch-rate-2 exch-rate-other)
+  set BASE-YEAR-EXCHANGE-RATES exch-rate-c0
 end
 
 
@@ -250,19 +247,15 @@ to-report number-deposit-receipts-owned
   report [length deposit-receipts] of proj-investors
 end
 
-to-report PI-total-cash-held-in-ref [ref-currency] ;; takes number (not string) as input
-  let currency-0-held table:get cash "0"
-  let currency-1-held table:get cash "1"
-  let currency-2-held table:get cash "2"
-  let currency-other-held table:get cash "other"
+to-report PI-total-cash-held-in-ref [ref-currency] ;; takes number (not string) as input -- now takes string
+  let cash-held-in-ref 0
 
-  let currency-0-held-in-ref convert-currency 0 ref-currency currency-0-held
-  let currency-1-held-in-ref convert-currency 1 ref-currency currency-1-held
-  let currency-2-held-in-ref convert-currency 2 ref-currency currency-2-held
-  let currency-other-held-in-ref convert-currency "other" ref-currency currency-other-held
+  foreach table:keys cash [ currency-name ->
+    let new-amount convert-currency currency-name ref-currency table:get cash currency-name
+    set cash-held-in-ref (cash-held-in-ref + new-amount)
+  ]
 
-  let total-cash-held-in-ref (currency-0-held-in-ref + currency-1-held-in-ref + currency-2-held-in-ref + currency-other-held-in-ref)
-  report precision total-cash-held-in-ref 4
+  report precision cash-held-in-ref 4
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
@@ -360,9 +353,9 @@ HORIZONTAL
 
 PLOT
 16
-180
+192
 309
-309
+321
 projects completed per investor distribution
 NIL
 NIL
@@ -378,9 +371,9 @@ PENS
 
 PLOT
 16
-316
+328
 310
-460
+472
 projects completed per patch distribution
 NIL
 NIL
@@ -550,9 +543,9 @@ PENS
 
 PLOT
 16
-467
+479
 384
-608
+620
 total money in system over time (in ref currency)
 NIL
 NIL
@@ -568,10 +561,10 @@ PENS
 "total PI money" 1.0 0 -13840069 true "" "plot sum [PI-total-cash-held-in-ref global-ref-currency] of proj-investors"
 
 TEXTBOX
-545
-525
-730
-572
+397
+577
+582
+624
 These constants control the functions that relate rent, soil health, and PI investment.\n
 11
 0.0
@@ -614,8 +607,38 @@ CHOOSER
 181
 global-ref-currency
 global-ref-currency
-0 1 2 3
+"c0"
 0
+
+SLIDER
+571
+515
+768
+548
+num-centralized-currencies
+num-centralized-currencies
+0
+10
+4.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+570
+557
+769
+590
+num-decentralized-currencies
+num-decentralized-currencies
+0
+10
+2.0
+1
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
