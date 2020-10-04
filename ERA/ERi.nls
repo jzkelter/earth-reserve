@@ -22,7 +22,7 @@ to-report convert-currency [origin-currency target-currency amount-in-origin-cur
 end
 
 
-to subtract-from-cash-holdings [origin-currency amount-to-subtract] ;; origin currency is now name like "c0"
+to subtract-from-cash-holdings [origin-currency amount-to-subtract] ;; origin currency takes name like "c0"
 ;; project investors run this procedure
   let origin-currency-held table:get cash origin-currency
   
