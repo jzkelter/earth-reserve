@@ -48,8 +48,8 @@ ops-nodes-own [
 
 to setup
   clear-all
-  setup-currencies
   setup-ops-nodes
+  set CURRENCY-LIST [ops-node-currency] of ops-nodes
   setup-proj-investors
   setup-patches
   set TIME-NOW time:anchor-to-ticks (time:create "2000-01-01") 1 "month"
@@ -77,7 +77,7 @@ to setup-ops-nodes
         set shape "Circle (2)"
         set size 2
         set node-jurisdiction [who] of self
-        set ops-node-currency item node-jurisdiction CURRENCY-LIST
+        set ops-node-currency word "c" [who] of self
       ]
     ]
   ]
@@ -87,7 +87,7 @@ to setup-ops-nodes
     set size 2
     setxy random-xcor random-ycor
     set node-jurisdiction "decentralized"
-    set ops-node-currency item ([who] of self) CURRENCY-LIST
+    set ops-node-currency word "d" ([who] of self - num-centralized-currencies)
   ]
   ask ops-nodes [
     set PIs-with-new-projects-for-me (list)
@@ -114,19 +114,6 @@ to setup-proj-investors
     set current-projects (list)
     set deposit-receipts (list)
   ]
-end
-
-to setup-currencies
-  let current-list (list)
-  let possible-centralized (list "c0" "c1" "c2" "c3" "c4" "c5" "c6" "c7" "c8" "c9" "c10")
-  let possible-decentralized (list "d0" "d1" "d2" "d3" "d4" "d5" "d6" "d7" "d8" "d9" "d10")
-  foreach n-values num-centralized-currencies [i -> i] [ i ->
-    set current-list lput (item i possible-centralized) current-list
-  ]
-  foreach n-values num-decentralized-currencies [i -> i] [ i ->
-    set current-list lput (item i possible-decentralized) current-list
-  ]
-  set CURRENCY-LIST current-list
 end
 
 to setup-proj-investor-cash
@@ -247,7 +234,7 @@ to-report number-deposit-receipts-owned
   report [length deposit-receipts] of proj-investors
 end
 
-to-report PI-total-cash-held-in-ref [ref-currency] ;; takes number (not string) as input -- now takes string
+to-report PI-total-cash-held-in-ref [ref-currency] ;; takes string as input
   let cash-held-in-ref 0
 
   foreach table:keys cash [ currency-name ->
