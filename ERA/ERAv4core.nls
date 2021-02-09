@@ -240,7 +240,7 @@ to core.update-or-complete-projects
   let to-delete (list)
   
   foreach current-projects [ proj -> 
-    if time:is-equal table:get proj "project-completion-date" TIME-NOW [
+    if time:is-equal? table:get proj "project-completion-date" TIME-NOW [
       set completed-projects (completed-projects + 1)
       set to-delete fput proj to-delete
     ]

@@ -66,7 +66,7 @@ to RED.check-auto-node-redeem
   foreach deposit-receipts [ dr ->
     let time-held table:get dr "time-held"
     (ifelse 
-      time:is-equal TIME-NOW table:get dr "carry-end-date" [
+      time:is-equal? TIME-NOW table:get dr "carry-end-date" [
         ;; does the node still need to update estimate first?
         RED.redeem-deposit-receipt dr RED.node-latest-estimate dr
       ]
