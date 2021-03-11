@@ -133,7 +133,7 @@ to-report calc-new-soil-health-given-investment [PI-ability proj-cost old-soil-h
 end
 
 to-report calc-rent [soil-health-input]
-  report c0 * ln(soil-health-input)
+  report c0 * ln(soil-health-input) ;;
 end
 
 to-report calc-investment [soil-health-input PI-ability] ;; investment needed to get from 0 health to (soil-health-input) level

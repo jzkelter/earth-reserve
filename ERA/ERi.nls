@@ -25,6 +25,52 @@ to ERi.recalculate-exchange-rates
 ;  set BASE-YEAR-EXCHANGE-RATES original-base-year-exchange-rates
 end
 
+to ERi.recalculate-ERiE ;called by observer
+  let new-ERiE table:make
+  let soil-health-table table:make
+  let eco 0
+  let ecoregion-list "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  let curr-soil-health 0
+  let curr-eco "A"
+  while [eco < 3] [
+    set curr-eco (item eco ecoregion-list)
+    set curr-soil-health (mean [soil-health] of patches with [ecoregion = curr-eco] / 200)
+    table:put soil-health-table curr-eco curr-soil-health
+    table:put new-ERiE curr-eco (Bezier ((table:get PREVIOUS-SOIL-HEALTH curr-eco)- curr-soil-health))
+    set eco eco + 1
+  ]
+  set PREVIOUS-SOIL-HEALTH soil-health-table
+  set ERiE new-ERiE
+end
+
+to ERi.recalculate-ERiC ;called by ops-nodes
+  let ecoregion-list "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  let eco 0
+  let eric-temp 0
+  while [eco < 3] [
+    set eric-temp eric-temp + ((table:get ERiE (item eco ecoregion-list)) * (ecoregion-percent (item eco ecoregion-list) who))
+    set eco eco + 1
+  ]
+  set ERiC eric-temp
+end
+
+to-report ecoregion-percent [eco jur]
+  if jur = 3 [report 0]
+  report count patches with [Ecoregion = eco and jurisdiction = jur] / count patches with [jurisdiction = jur]
+end
+
+to-report Bezier [unadjusted-erie] ;https://javascript.info/bezier-curve
+  ;numbers currently hardcoded but we can change that later with sliders
+  if unadjusted-erie >= 1 [report 0.3]
+  if unadjusted-erie <= -1 [report 10]
+  
+  let t 0
+  while [ (1 - t) ^ 3 + 0.2 * (1 - t) ^ 2 * t + -3 * (1 - t) * t ^ 2 + -1 * t ^ 3 > unadjusted-erie] [
+    set t t + 0.01
+  ]
+  report 0.3 * (1 - t) ^ 3 + 3 * (1 - t) ^ 2 * t + 0.15 * (1 - t) * t ^ 2 + 10 * t ^ 3
+end
+
 
 to-report convert-currency [origin-currency target-currency amount-in-origin-currency] ;; currencies should be numbers 0,1,2 or "other"
   let origin-currency-index origin-currency

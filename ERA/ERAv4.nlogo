@@ -12,7 +12,9 @@ globals [
   TIME-NOW
   ALL-DEPOSIT-RECEIPTS
   TOTAL-AMOUNT-MONEY
-  ERiC
+  PREVIOUS-SOIL-HEALTH
+  ERiE
+  INTERNATIONAL-COT
   BASE-YEAR-EXCHANGE-RATES
   CURRENT-EXCHANGE-RATES
 ]
@@ -40,6 +42,7 @@ proj-investors-own [
 ops-nodes-own [
   node-jurisdiction
   PIs-with-new-projects-for-me  ;; a new list of turtles every tick
+  ERiC
 ]
 
 to setup
@@ -51,9 +54,10 @@ to setup
   set ALL-DEPOSIT-RECEIPTS (list)
   setup-base-yr-exch-rate
   set CURRENT-EXCHANGE-RATES map copy-table BASE-YEAR-EXCHANGE-RATES ;; because ERiCs aren't changing right now
-  setup-ERiC
   set TOTAL-AMOUNT-MONEY sum [PI-total-cash-held-in-ref global-ref-currency] of proj-investors
+  setup-ERiE
   reset-ticks
+  setup-international-COT
 end
 
 to-report copy-table [ orig ]
@@ -72,6 +76,17 @@ to setup-ops-nodes
         set shape "Circle (2)"
         set size 2
         set node-jurisdiction [who] of self
+        (ifelse
+          [who] of self = 0 [
+            set ERiC 1.2
+          ]
+          [who] of self = 1 [
+            set ERiC 0.8
+          ]
+          [who] of self = 2 [
+            set ERiC 1.5
+          ]
+        )
       ]
     ]
   ]
@@ -81,6 +96,7 @@ to setup-ops-nodes
     set size 2
     setxy random-xcor random-ycor
     set node-jurisdiction "decentralized"
+    set ERiC 1
   ]
   ask ops-nodes [
     set PIs-with-new-projects-for-me (list)
@@ -166,51 +182,70 @@ to setup-patches
   ]
 end
 
-to setup-ERiC
-  let eric-table table:make
-  table:put eric-table "ERiC 0" 1.2
-  table:put eric-table "ERiC 1" 0.8
-  table:put eric-table "ERiC 2" 1.5
-  table:put eric-table "ERiC other" 1
-  set ERiC eric-table
+to setup-ERiE
+  let soil-health-table table:make
+  table:put soil-health-table "A" mean [soil-health] of patches with [ecoregion = "A"]
+  table:put soil-health-table "B" mean [soil-health] of patches with [ecoregion = "B"]
+  table:put soil-health-table "C" mean [soil-health] of patches with [ecoregion = "C"]
+  set PREVIOUS-SOIL-HEALTH soil-health-table
+
+  let erie-table table:make
+  table:put erie-table "A" 1
+  table:put erie-table "B" 1
+  table:put erie-table "C" 1
+  set ERiE erie-table
+end
+
+to setup-international-COT
+  ;placeholder for currency of transaction, we could also randomly generate (or include a slider)
+  let cot-table table:make
+  table:put cot-table 0 800
+  table:put cot-table 1 1000
+  table:put cot-table 2 1200
+  set INTERNATIONAL-COT cot-table
 end
 
 to setup-base-yr-exch-rate
   let exch-rate-0 table:make
   table:put exch-rate-0 "0" 1
-  table:put exch-rate-0 "1" 3
+  table:put exch-rate-0 "1" 1.5
   table:put exch-rate-0 "2" 0.8
   table:put exch-rate-0 "other" 1.2
 
   let exch-rate-1 table:make
   table:put exch-rate-1 "0" 0.67
   table:put exch-rate-1 "1" 1
-  table:put exch-rate-1 "2" 2
-  table:put exch-rate-1 "other" 1.8
+  table:put exch-rate-1 "2" 0.533
+  table:put exch-rate-1 "other" 0.8
 
   let exch-rate-2 table:make
   table:put exch-rate-2 "0" 1.25
-  table:put exch-rate-2 "1" 0.5
+  table:put exch-rate-2 "1" 1.875
   table:put exch-rate-2 "2" 1
-  table:put exch-rate-2 "other" 1.6
+  table:put exch-rate-2 "other" 1.5
 
   let exch-rate-other table:make
-  table:put exch-rate-other "0" 0.83
-  table:put exch-rate-other "1" 0.56
-  table:put exch-rate-other "2" 0.625
+  table:put exch-rate-other "0" 0.833
+  table:put exch-rate-other "1" 1.25
+  table:put exch-rate-other "2" 0.67
   table:put exch-rate-other "other" 1
-
   set BASE-YEAR-EXCHANGE-RATES (list exch-rate-0 exch-rate-1 exch-rate-2 exch-rate-other)
 end
 
 
-
 to go
+  if (ticks > 0 and ticks mod 84 = 0) [
+    ERi.recalculate-ERiE
+    ask ops-nodes [
+      ERi.recalculate-ERiC
+    ]
+    ;ERi.recalculate-exchange-rates
+  ]
+
   if (ticks > 0 and ticks mod 10 = 0) [
     core.soil-degradation
   ]
 
-  ERi.recalculate-exchange-rates
 
   ask proj-investors [
     core.update-or-complete-projects
@@ -238,7 +273,6 @@ to go
       RED.check-if-owner-wants-to-redeem
     ]
   ]
-
   tick
 end
 
@@ -586,7 +620,7 @@ avg-soil-deg-rate
 avg-soil-deg-rate
 0
 0.1
-0.02
+0.021
 0.001
 1
 NIL
@@ -601,7 +635,7 @@ n-drs-checked
 n-drs-checked
 0
 20
-17.0
+20.0
 1
 1
 NIL
@@ -616,6 +650,21 @@ global-ref-currency
 global-ref-currency
 0 1 2 3
 0
+
+SLIDER
+1049
+16
+1221
+49
+num-jurisdictions
+num-jurisdictions
+1
+10
+3.0
+1
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
