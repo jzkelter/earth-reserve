@@ -29,14 +29,17 @@ to ERi.recalculate-ERiE ;called by observer
   let new-ERiE table:make
   let soil-health-table table:make
   let eco 0
-  let ecoregion-list "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
   let curr-soil-health 0
   let curr-eco "A"
-  while [eco < 3] [
-    set curr-eco (item eco ecoregion-list)
-    set curr-soil-health (mean [soil-health] of patches with [ecoregion = curr-eco] / 200)
+  while [eco < num-ecoregions] [
+    set curr-eco (index-to-ecoregion eco)
+    ifelse count patches with [ecoregion = curr-eco] = 0 [
+      set curr-soil-health 0
+    ]  [
+      set curr-soil-health (mean [soil-health] of patches with [ecoregion = curr-eco] / 200)
+    ]
     table:put soil-health-table curr-eco curr-soil-health
-    table:put new-ERiE curr-eco (Bezier ((table:get PREVIOUS-SOIL-HEALTH curr-eco)- curr-soil-health))
+    table:put new-ERiE curr-eco (Bezier ((table:get PREVIOUS-SOIL-HEALTH curr-eco)- curr-soil-health) 0 1)
     set eco eco + 1
   ]
   set PREVIOUS-SOIL-HEALTH soil-health-table
@@ -44,46 +47,60 @@ to ERi.recalculate-ERiE ;called by observer
 end
 
 to ERi.recalculate-ERiC ;called by ops-nodes
-  let ecoregion-list "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
   let eco 0
   let eric-temp 0
-  while [eco < 3] [
-    set eric-temp eric-temp + ((table:get ERiE (item eco ecoregion-list)) * (ecoregion-percent (item eco ecoregion-list) who))
+  while [eco < num-ecoregions] [
+    set eric-temp eric-temp + ((table:get ERiE (index-to-ecoregion eco)) * (ecoregion-percent (index-to-ecoregion eco) who))
     set eco eco + 1
   ]
   set ERiC eric-temp
 end
 
 to-report ecoregion-percent [eco jur]
-  if jur = 3 [report 0]
+  if count patches with [jurisdiction = jur] = 0 [report 0] ;; this is a catch all for decentralized op-node and op-nodes with no patches
   report count patches with [Ecoregion = eco and jurisdiction = jur] / count patches with [jurisdiction = jur]
 end
 
-to-report Bezier [unadjusted-erie] ;https://javascript.info/bezier-curve
+to-report Bezier [unadjusted-erie lower-bound upper-bound] ;https://javascript.info/bezier-curve
   ;numbers currently hardcoded but we can change that later with sliders
   if unadjusted-erie >= 1 [report 0.3]
   if unadjusted-erie <= -1 [report 10]
   
-  let t 0
-  while [ (1 - t) ^ 3 + 0.2 * (1 - t) ^ 2 * t + -3 * (1 - t) * t ^ 2 + -1 * t ^ 3 > unadjusted-erie] [
-    set t t + 0.01
-  ]
-  report 0.3 * (1 - t) ^ 3 + 3 * (1 - t) ^ 2 * t + 0.15 * (1 - t) * t ^ 2 + 10 * t ^ 3
+;  let t 0
+;  while [ (1 - t) ^ 3 + 0.2 * (1 - t) ^ 2 * t + -3 * (1 - t) * t ^ 2 + -1 * t ^ 3 > unadjusted-erie] [
+;    set t t + 0.01
+;  ]
+;  report 0.3 * (1 - t) ^ 3 + 3 * (1 - t) ^ 2 * t + 0.15 * (1 - t) * t ^ 2 + 10 * t ^ 3
+;  
+  let t ((upper-bound - lower-bound) / 2) + lower-bound
+  (ifelse precision ((1 - t) ^ 3 + 0.2 * (1 - t) ^ 2 * t + -3 * (1 - t) * t ^ 2 + -1 * t ^ 3) 2 = precision unadjusted-erie 2 [
+    report 0.3 * (1 - t) ^ 3 + 3 * (1 - t) ^ 2 * t + 0.15 * (1 - t) * t ^ 2 + 10 * t ^ 3
+  ]  (1 - t) ^ 3 + 0.2 * (1 - t) ^ 2 * t + -3 * (1 - t) * t ^ 2 + -1 * t ^ 3 > unadjusted-erie [ 
+    report (Bezier unadjusted-erie t upper-bound)
+  ]  [
+    report (Bezier unadjusted-erie lower-bound t)
+  ])
+    
+  
 end
 
 
-to-report convert-currency [origin-currency target-currency amount-in-origin-currency] ;; currencies should be numbers 0,1,2 or "other"
+to-report index-to-ecoregion [index]
+  report (item index "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+end
+
+to-report convert-currency [origin-currency target-currency amount-in-origin-currency] ;; currencies should be numbers corresponding the "who" of the ops-nodes
   let origin-currency-index origin-currency
-  if origin-currency = "decentralized" or origin-currency = "other" [ set origin-currency-index 3 ]
-  let target-currency-index target-currency
-  if target-currency = "decentralized" or target-currency = "other" [ set target-currency-index 3 ]
+  let target-currency-index target-currency 
+  if origin-currency-index = "decentralized" [set origin-currency-index 3]
+  if target-currency-index = "decentralized" [set target-currency-index 3]
   let current-exchange-rates-in-origin table:to-list item origin-currency-index CURRENT-EXCHANGE-RATES
   let relevant-exchange-rate last item target-currency-index current-exchange-rates-in-origin ;; 1 unit origin = X units target
   report (amount-in-origin-currency * relevant-exchange-rate)
 end
 
 
-to subtract-from-cash-holdings [origin-currency amount-to-subtract] ;; origin-currency (0,1,2,3) is the currency amount-to-subtract is expressed in currently
+to subtract-from-cash-holdings [origin-currency amount-to-subtract] ;; origin-currency is the currency amount-to-subtract is expressed in currently
   let cash-holdings-list table:to-list cash ;; [["currency-name" amount-held][...][...][...]]
   let origin-currency-held last item origin-currency cash-holdings-list
   let origin-currency-key item origin-currency table:keys cash
@@ -108,7 +125,7 @@ to subtract-from-cash-holdings [origin-currency amount-to-subtract] ;; origin-cu
       let cash-held-in-currency last entry
       let currency-index 3 ;; this is for "other"
       ;; need to convert currency so need to get index of the current currency being looped on
-      if currency-name != "other" [set currency-index read-from-string currency-name]
+      ;; if currency-name != "other" [set currency-index read-from-string currency-name]
       let relevant-currency-key item currency-index table:keys cash
       let amount-left-to-subtract-in-currency precision (convert-currency origin-currency currency-index amount-left-to-subtract) 2
 

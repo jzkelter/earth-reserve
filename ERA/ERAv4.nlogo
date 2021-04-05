@@ -69,32 +69,23 @@ to-report copy-table [ orig ]
 end
 
 to setup-ops-nodes
-  foreach n-of 3 base-colors [ c ->   ;; 3 is placeholder for number of jurisdictions
+  foreach n-of num-jurisdictions base-colors [ c ->   ;; num-jurisdictions does not include decentralized
     ask one-of patches [
       sprout-ops-nodes 1 [
-        set color c
+        set color grey
         set shape "Circle (2)"
         set size 2
         set node-jurisdiction [who] of self
-        (ifelse
-          [who] of self = 0 [
-            set ERiC 1.2
-          ]
-          [who] of self = 1 [
-            set ERiC 0.8
-          ]
-          [who] of self = 2 [
-            set ERiC 1.5
-          ]
-        )
+        set ERiC  random-normal 1 0.1
+
       ]
     ]
   ]
-  create-ops-nodes 1 [  ;; this is standing in for the decentralized ops-node (like cryptos)
+  create-ops-nodes num-decentralized-currencies [  ;; this is standing in for the decentralized ops-node (like cryptos)
     set color white
     set shape "Circle (2)"
     set size 2
-    setxy random-xcor random-ycor
+    setxy random-xcor -16.5
     set node-jurisdiction "decentralized"
     set ERiC 1
   ]
@@ -126,110 +117,141 @@ end
 
 to setup-proj-investor-cash
   let cash-table table:make
-  table:put cash-table "0" 0
-  table:put cash-table "1" 0
-  table:put cash-table "2" 0
-  table:put cash-table "other" 0
-  (ifelse
-    home-jurisdiction = 0 [
-      table:put cash-table "0" round random-normal 100 25
-    ]
-    home-jurisdiction = 1 [
-      table:put cash-table "1" round random-normal 100 25
-    ]
-    home-jurisdiction = 2 [
-      table:put cash-table "2" round random-normal 100 25
-    ]
-  )
+
+  let curr-jurisdiction 0
+  while [curr-jurisdiction < num-jurisdictions] [
+    (ifelse curr-jurisdiction = home-jurisdiction [
+      table:put cash-table home-jurisdiction round random-normal 100 25
+    ]  [
+      table:put cash-table curr-jurisdiction 0
+    ])
+    set curr-jurisdiction curr-jurisdiction + 1
+  ]
+
+  (ifelse home-jurisdiction = "decentralized" [
+    table:put cash-table "decentralized" round random-normal 100 25
+  ]  [
+    table:put cash-table "decentralized" 0
+  ])
   set cash cash-table
 end
 
 to setup-patches
-  let ecoregion-boundary-1 random (world-height / 2)
-  let ecoregion-boundary-2 random (world-height / 2)
   ask patches [
     set soil-health (1 + random 100)
     set jurisdiction [node-jurisdiction] of min-one-of CENTRALIZED-OPS-NODES [distance myself]
-    set base-color [color] of one-of CENTRALIZED-OPS-NODES with [who = [jurisdiction] of myself]
-    set pcolor scale-color base-color soil-health -200 200
+    ;set base-color [color] of one-of CENTRALIZED-OPS-NODES with [who = [jurisdiction] of myself]
+    ;set pcolor scale-color base-color soil-health -200 200
     set proj-here? false
-    (ifelse
-      pycor <= min-pycor + ecoregion-boundary-1 [
-        set ecoregion "A"
-      ]
-      pycor >= max-pycor - ecoregion-boundary-2 [
-        set ecoregion "C"
-      ][ ;; else
-        set ecoregion "B"
-      ]
-    )
   ]
-  ask patches with [ecoregion = "A"][
-    sprout 1 [
-      set color 3
-      set shape "x"
-      stamp
-      die
+  let curr-ecoregion 0
+  let curr-color one-of base-colors
+  while [curr-ecoregion < num-ecoregions - 1] [
+    let eco-boundary ((random-float 1) * world-height / (num-ecoregions - 1)) + (curr-ecoregion * world-height / num-ecoregions - 1) + min-pycor
+    let new-color one-of base-colors
+    while [new-color = curr-color] [ ;ensures that we don't have the same color on two ecoregions
+      set new-color one-of base-colors
+    ]
+    set curr-color new-color
+    ask patches with [pycor <=  eco-boundary and ecoregion = 0] [
+      set ecoregion (index-to-ecoregion curr-ecoregion)
+      set base-color new-color
+      set pcolor scale-color base-color soil-health -200 200
+    ]
+    set curr-ecoregion curr-ecoregion + 1
+  ]
+  let new-color one-of base-colors
+  while [new-color = curr-color] [ ;ensures that we don't have the same color on two ecoregions
+    set new-color one-of base-colors
+  ]
+  ask patches with [ecoregion = 0] [
+    set ecoregion (index-to-ecoregion curr-ecoregion)
+    set base-color new-color
+    set pcolor scale-color base-color soil-health -200 200
+  ]
+
+  ask patches with [pxcor != 16] [
+    let curr-x pxcor
+    let curr-y pycor
+    if jurisdiction != [jurisdiction] of patch-at 1 0 [
+      sprout 1 [
+        set color 0
+        set heading 0
+        set xcor pxcor + 0.5
+        set shape "line"
+        __set-line-thickness 0.15
+        stamp
+        die
+      ]
     ]
   ]
-  ask patches with [ecoregion = "C"][
-    sprout 1 [
-      set color 3
-      set shape "dot"
-      stamp
-      die
+  ask patches with [pycor != 16] [
+    let curr-x pxcor
+    let curr-y pycor
+    if jurisdiction != [jurisdiction] of patch-at 0 1 [
+      sprout 1 [
+        set color 0
+        set heading 90
+        set ycor pycor + 0.5
+        set shape "line"
+        __set-line-thickness 0.15
+        stamp
+        die
+      ]
     ]
   ]
+
 end
 
 to setup-ERiE
   let soil-health-table table:make
-  table:put soil-health-table "A" mean [soil-health] of patches with [ecoregion = "A"]
-  table:put soil-health-table "B" mean [soil-health] of patches with [ecoregion = "B"]
-  table:put soil-health-table "C" mean [soil-health] of patches with [ecoregion = "C"]
-  set PREVIOUS-SOIL-HEALTH soil-health-table
-
   let erie-table table:make
-  table:put erie-table "A" 1
-  table:put erie-table "B" 1
-  table:put erie-table "C" 1
+  let curr-ecoregion 0
+  while [curr-ecoregion < num-ecoregions] [
+    let eco (index-to-ecoregion curr-ecoregion)
+    ifelse count patches with [ecoregion = eco] = 0 [
+      table:put soil-health-table eco 0
+    ]  [
+      table:put soil-health-table eco mean [soil-health] of patches with [ecoregion = eco]
+    ]
+    table:put erie-table eco 1
+    set curr-ecoregion curr-ecoregion + 1
+  ]
+  set PREVIOUS-SOIL-HEALTH soil-health-table
   set ERiE erie-table
 end
 
 to setup-international-COT
-  ;placeholder for currency of transaction, we could also randomly generate (or include a slider)
   let cot-table table:make
-  table:put cot-table 0 800
-  table:put cot-table 1 1000
-  table:put cot-table 2 1200
+  let curr-jurisdiction 0
+  while [curr-jurisdiction < num-jurisdictions + num-decentralized-currencies] [
+    table:put cot-table curr-jurisdiction random-normal 1000 100 ;arbitrary distribution
+    set curr-jurisdiction curr-jurisdiction + 1
+  ]
+  if (calibration = "2-dominant") [
+    table:put cot-table 0 random-normal 4000 400
+    table:put cot-table 1 random-normal 4000 400
+  ]
   set INTERNATIONAL-COT cot-table
 end
 
 to setup-base-yr-exch-rate
-  let exch-rate-0 table:make
-  table:put exch-rate-0 "0" 1
-  table:put exch-rate-0 "1" 1.5
-  table:put exch-rate-0 "2" 0.8
-  table:put exch-rate-0 "other" 1.2
 
-  let exch-rate-1 table:make
-  table:put exch-rate-1 "0" 0.67
-  table:put exch-rate-1 "1" 1
-  table:put exch-rate-1 "2" 0.533
-  table:put exch-rate-1 "other" 0.8
+  let base-exchange-rates (list)
+  let jurisdiction-row 0
+  let exch-rate table:make
+  while [jurisdiction-row < num-jurisdictions + num-decentralized-currencies] [
+    let jurisdiction-column 0
+    while [jurisdiction-column < num-jurisdictions + num-decentralized-currencies] [
+      let exchange item 0 [ERiC] of ops-nodes with [who = jurisdiction-column] / item 0 [ERiC] of ops-nodes with [who = jurisdiction-row]
+      table:put exch-rate jurisdiction-column exchange
+      set jurisdiction-column jurisdiction-column + 1
+    ]
+    set jurisdiction-row jurisdiction-row + 1
+    set base-exchange-rates lput (copy-table exch-rate) base-exchange-rates
+  ]
 
-  let exch-rate-2 table:make
-  table:put exch-rate-2 "0" 1.25
-  table:put exch-rate-2 "1" 1.875
-  table:put exch-rate-2 "2" 1
-  table:put exch-rate-2 "other" 1.5
-
-  let exch-rate-other table:make
-  table:put exch-rate-other "0" 0.833
-  table:put exch-rate-other "1" 1.25
-  table:put exch-rate-other "2" 0.67
-  table:put exch-rate-other "other" 1
-  set BASE-YEAR-EXCHANGE-RATES (list exch-rate-0 exch-rate-1 exch-rate-2 exch-rate-other)
+  set BASE-YEAR-EXCHANGE-RATES base-exchange-rates
 end
 
 
@@ -285,17 +307,19 @@ to-report number-deposit-receipts-owned
 end
 
 to-report PI-total-cash-held-in-ref [ref-currency] ;; takes number (not string) as input
-  let currency-0-held table:get cash "0"
-  let currency-1-held table:get cash "1"
-  let currency-2-held table:get cash "2"
-  let currency-other-held table:get cash "other"
 
-  let currency-0-held-in-ref convert-currency 0 ref-currency currency-0-held
-  let currency-1-held-in-ref convert-currency 1 ref-currency currency-1-held
-  let currency-2-held-in-ref convert-currency 2 ref-currency currency-2-held
-  let currency-other-held-in-ref convert-currency "other" ref-currency currency-other-held
 
-  let total-cash-held-in-ref (currency-0-held-in-ref + currency-1-held-in-ref + currency-2-held-in-ref + currency-other-held-in-ref)
+  let total-cash-held-in-ref 0
+  let curr-jurisdiction 0
+  while [curr-jurisdiction < num-jurisdictions] [
+    set total-cash-held-in-ref total-cash-held-in-ref + (convert-currency curr-jurisdiction ref-currency table:get cash curr-jurisdiction)
+    set curr-jurisdiction curr-jurisdiction + 1
+  ]
+  set total-cash-held-in-ref total-cash-held-in-ref + (convert-currency "decentralized" ref-currency table:get cash "decentralized")
+
+
+
+
   report precision total-cash-held-in-ref 4
 end
 @#$#@#$#@
@@ -500,17 +524,17 @@ tax-rate
 tax-rate
 0
 0.05
-0.0055
+0.0058
 0.0001
 1
 NIL
 HORIZONTAL
 
 PLOT
-792
-297
-1047
-447
+1051
+452
+1306
+602
 num DRs in market over time
 NIL
 NIL
@@ -523,24 +547,6 @@ false
 "" ""
 PENS
 "default" 1.0 0 -16777216 true "" "plot number-deposit-receipts-in-market"
-
-PLOT
-789
-148
-1046
-289
-average soil health over time
-NIL
-NIL
-0.0
-10.0
-0.0
-10.0
-true
-false
-"" ""
-PENS
-"default" 1.0 0 -16777216 true "" "plot mean [soil-health] of patches"
 
 MONITOR
 635
@@ -658,13 +664,95 @@ SLIDER
 49
 num-jurisdictions
 num-jurisdictions
-1
+2
 10
-3.0
+4.0
 1
 1
 NIL
 HORIZONTAL
+
+SLIDER
+1049
+54
+1221
+87
+num-ecoregions
+num-ecoregions
+2
+10
+4.0
+1
+1
+NIL
+HORIZONTAL
+
+CHOOSER
+1047
+97
+1226
+142
+calibration
+calibration
+"custom" "2-dominant"
+1
+
+SLIDER
+1222
+16
+1434
+49
+num-decentralized-currencies
+num-decentralized-currencies
+0
+5
+1.0
+1
+1
+NIL
+HORIZONTAL
+
+PLOT
+788
+296
+1130
+446
+ERiC over time
+NIL
+NIL
+0.0
+10.0
+0.0
+3.0
+true
+true
+"" ""
+PENS
+"Mean" 1.0 0 -16777216 true "" "plot mean [eric] of ops-nodes with [node-jurisdiction != \"decentralized\"]"
+"Currency 0" 1.0 0 -13840069 true "" "plot item 0 [eric] of ops-nodes with [who = 0]"
+"Currency 1" 1.0 0 -13791810 true "" "plot item 0 [eric] of ops-nodes with [who = 1]"
+"Currency 2" 1.0 0 -1184463 true "" "plot item 0 [eric] of ops-nodes with [who = 2]"
+
+PLOT
+789
+148
+1134
+289
+average soil health over time
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+true
+"" ""
+PENS
+"Mean" 1.0 0 -16777216 true "" "plot mean [soil-health] of patches"
+"Jurisdiction 0" 1.0 0 -13840069 true "" "plot mean [soil-health] of patches with [jurisdiction = 0]"
+"Jurisdiction 1" 1.0 0 -13791810 true "" "plot mean [soil-health] of patches with [jurisdiction = 1]"
+"Jurisidiction 2" 1.0 0 -1184463 true "" "plot mean [soil-health] of patches with [jurisdiction = 2]"
 
 @#$#@#$#@
 ## WHAT IS IT?

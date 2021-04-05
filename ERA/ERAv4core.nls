@@ -9,17 +9,21 @@ end
 to-report soil-degrade-rate [ecoregion-input]
 ;; patches use this reporter
 ;; this will eventually be "hard-coded"/taking input from dataset based on eco-agro zones 
-  (ifelse 
-    ecoregion-input = "A" [
-      report avg-soil-deg-rate - (avg-soil-deg-rate / 2)
-    ] 
-    ecoregion-input = "B" [
-      report avg-soil-deg-rate + (avg-soil-deg-rate / 2)
-    ] 
-    ecoregion-input = "C" [
-      report avg-soil-deg-rate
-    ]
-  )
+  
+;saving original method for now for reference
+;  (ifelse 
+;    ecoregion-input = "A" [
+;      report avg-soil-deg-rate - (avg-soil-deg-rate / 2)
+;    ] 
+;    ecoregion-input = "B" [
+;      report avg-soil-deg-rate + (avg-soil-deg-rate / 2)
+;    ] 
+;    ecoregion-input = "C" [
+;      report avg-soil-deg-rate
+;    ]
+;  )
+  report random-normal avg-soil-deg-rate (avg-soil-deg-rate / 5)
+  
 end
 
 to core.look-for-new-project
