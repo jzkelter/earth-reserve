@@ -9,19 +9,7 @@ end
 to-report soil-degrade-rate [ecoregion-input]
 ;; patches use this reporter
 ;; this will eventually be "hard-coded"/taking input from dataset based on eco-agro zones 
-  
-;saving original method for now for reference
-;  (ifelse 
-;    ecoregion-input = "A" [
-;      report avg-soil-deg-rate - (avg-soil-deg-rate / 2)
-;    ] 
-;    ecoregion-input = "B" [
-;      report avg-soil-deg-rate + (avg-soil-deg-rate / 2)
-;    ] 
-;    ecoregion-input = "C" [
-;      report avg-soil-deg-rate
-;    ]
-;  )
+
   report random-normal avg-soil-deg-rate (avg-soil-deg-rate / 5)
   
 end
@@ -168,7 +156,7 @@ to core.choose-ops-node
 ;; right now it's assumed the only possibilities are only that of their home country or a decentralized one
   let prob-choose-home-ops-node 80 ;; arbitrary for now
   
-  let proj-ops-node ifelse-value (random 100 < prob-choose-home-ops-node) [
+  let proj-ops-node ifelse-value (random 100 < prob-choose-home-ops-node or num-decentralized-currencies = 0) [
     one-of CENTRALIZED-OPS-NODES with [node-jurisdiction = [home-jurisdiction] of myself]
   ][
     one-of DECENTRALIZED-OPS-NODES
