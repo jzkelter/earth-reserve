@@ -30,7 +30,7 @@ patches-own [
 
 proj-investors-own [
   home-jurisdiction
-  cash
+  cash                 ;; a table holding cash in every relative currency
   potential-project    ;; a table that starts out empty every tick
   current-projects     ;; a list of tables
   ability              ;; number that represents project investors ability, range 0.1 to 1
@@ -53,11 +53,12 @@ to setup
   set TIME-NOW time:anchor-to-ticks (time:create "2000-01-01") 1 "month"
   set ALL-DEPOSIT-RECEIPTS (list)
   setup-base-yr-exch-rate
-  set CURRENT-EXCHANGE-RATES map copy-table BASE-YEAR-EXCHANGE-RATES ;; because ERiCs aren't changing right now
+  set CURRENT-EXCHANGE-RATES map copy-table BASE-YEAR-EXCHANGE-RATES
   set TOTAL-AMOUNT-MONEY sum [PI-total-cash-held-in-ref global-ref-currency] of proj-investors
   setup-ERiE
   reset-ticks
   setup-international-COT
+  setup-graphs
 end
 
 to-report copy-table [ orig ]
@@ -68,8 +69,11 @@ to-report copy-table [ orig ]
   report copy
 end
 
+
 to setup-ops-nodes
-  foreach n-of num-jurisdictions base-colors [ c ->   ;; num-jurisdictions does not include decentralized
+  let curr-jurisdiction 0
+
+  while [curr-jurisdiction < num-jurisdictions] [   ;; num-jurisdictions does not include decentralized
     ask one-of patches [
       sprout-ops-nodes 1 [
         set color grey
@@ -80,6 +84,7 @@ to setup-ops-nodes
 
       ]
     ]
+    set curr-jurisdiction curr-jurisdiction + 1
   ]
   create-ops-nodes num-decentralized-currencies [  ;; this is standing in for the decentralized ops-node (like cryptos)
     set color white
@@ -118,21 +123,15 @@ end
 to setup-proj-investor-cash
   let cash-table table:make
 
-  let curr-jurisdiction 0
-  while [curr-jurisdiction < num-jurisdictions] [
-    (ifelse curr-jurisdiction = home-jurisdiction [
+  let curr-currency 0
+  while [curr-currency < num-jurisdictions + num-decentralized-currencies] [ ;proj-investors never start with home jurisidiction = decentralized, but they can convert cash into the currencies later.
+    (ifelse curr-currency = home-jurisdiction [
       table:put cash-table home-jurisdiction round random-normal 100 25
     ]  [
-      table:put cash-table curr-jurisdiction 0
+      table:put cash-table curr-currency 0
     ])
-    set curr-jurisdiction curr-jurisdiction + 1
+    set curr-currency curr-currency + 1
   ]
-
-  (ifelse home-jurisdiction = "decentralized" [
-    table:put cash-table "decentralized" round random-normal 100 25
-  ]  [
-    table:put cash-table "decentralized" 0
-  ])
   set cash cash-table
 end
 
@@ -140,8 +139,6 @@ to setup-patches
   ask patches [
     set soil-health (1 + random 100)
     set jurisdiction [node-jurisdiction] of min-one-of CENTRALIZED-OPS-NODES [distance myself]
-    ;set base-color [color] of one-of CENTRALIZED-OPS-NODES with [who = [jurisdiction] of myself]
-    ;set pcolor scale-color base-color soil-health -200 200
     set proj-here? false
   ]
   let curr-ecoregion 0
@@ -238,22 +235,40 @@ end
 to setup-base-yr-exch-rate
 
   let base-exchange-rates (list)
-  let jurisdiction-row 0
+  let currency-row 0
   let exch-rate table:make
-  while [jurisdiction-row < num-jurisdictions + num-decentralized-currencies] [
-    let jurisdiction-column 0
-    while [jurisdiction-column < num-jurisdictions + num-decentralized-currencies] [
-      let exchange item 0 [ERiC] of ops-nodes with [who = jurisdiction-column] / item 0 [ERiC] of ops-nodes with [who = jurisdiction-row]
-      table:put exch-rate jurisdiction-column exchange
-      set jurisdiction-column jurisdiction-column + 1
+  while [currency-row < num-jurisdictions + num-decentralized-currencies] [
+    let currency-column 0
+    while [currency-column < num-jurisdictions + num-decentralized-currencies] [
+      let exchange item 0 [ERiC] of ops-nodes with [who = currency-column] / item 0 [ERiC] of ops-nodes with [who = currency-row]
+      table:put exch-rate currency-column exchange
+      set currency-column currency-column + 1
     ]
-    set jurisdiction-row jurisdiction-row + 1
+    set currency-row currency-row + 1
     set base-exchange-rates lput (copy-table exch-rate) base-exchange-rates
   ]
 
   set BASE-YEAR-EXCHANGE-RATES base-exchange-rates
 end
 
+to setup-graphs
+  let curr-currency 0
+  foreach n-of (num-jurisdictions + num-decentralized-currencies) base-colors [ c ->
+    if (curr-currency < num-jurisdictions) [ ;;if this then currency is centralized, don't run if decentralized because no soil health
+      set-current-plot "average soil health over time"
+      create-temporary-plot-pen word "Jurisdiction" curr-currency
+      set-plot-pen-color c
+      plot mean [soil-health] of patches with [jurisdiction = curr-currency]
+    ]
+
+    set-current-plot "ERiC over time" ;;we run this every time though
+    create-temporary-plot-pen word "Currency" curr-currency
+    set-plot-pen-color c
+    plot item 0 [eric] of ops-nodes with [who = curr-currency]
+
+    set curr-currency curr-currency + 1
+  ]
+end
 
 to go
   if (ticks > 0 and ticks mod 84 = 0) [
@@ -263,6 +278,22 @@ to go
     ]
     ;ERi.recalculate-exchange-rates
   ]
+
+  let curr-currency 0
+  while [curr-currency < num-jurisdictions + num-decentralized-currencies] [
+    if (curr-currency < num-jurisdictions) [
+      set-current-plot "average soil health over time"
+      set-current-plot-pen word "Jurisdiction" curr-currency
+      plot mean [soil-health] of patches with [jurisdiction = curr-currency]
+    ]
+
+    set-current-plot "ERiC over time" ;;we run this every time though
+    set-current-plot-pen word "Currency" curr-currency
+    plot item 0 [eric] of ops-nodes with [who = curr-currency]
+
+    set curr-currency curr-currency + 1
+  ]
+
 
   if (ticks > 0 and ticks mod 10 = 0) [
     core.soil-degradation
@@ -310,12 +341,11 @@ to-report PI-total-cash-held-in-ref [ref-currency] ;; takes number (not string) 
 
 
   let total-cash-held-in-ref 0
-  let curr-jurisdiction 0
-  while [curr-jurisdiction < num-jurisdictions] [
-    set total-cash-held-in-ref total-cash-held-in-ref + (convert-currency curr-jurisdiction ref-currency table:get cash curr-jurisdiction)
-    set curr-jurisdiction curr-jurisdiction + 1
+  let curr-currency 0
+  while [curr-currency < num-jurisdictions + num-decentralized-currencies] [
+    set total-cash-held-in-ref total-cash-held-in-ref + (convert-currency curr-currency ref-currency table:get cash curr-currency)
+    set curr-currency curr-currency + 1
   ]
-  set total-cash-held-in-ref total-cash-held-in-ref + (convert-currency "decentralized" ref-currency table:get cash "decentralized")
 
 
 
@@ -531,9 +561,9 @@ NIL
 HORIZONTAL
 
 PLOT
-1051
+1054
 452
-1306
+1309
 602
 num DRs in market over time
 NIL
@@ -695,7 +725,7 @@ CHOOSER
 calibration
 calibration
 "custom" "2-dominant"
-1
+0
 
 SLIDER
 1222
@@ -706,7 +736,7 @@ num-decentralized-currencies
 num-decentralized-currencies
 0
 5
-1.0
+2.0
 1
 1
 NIL
@@ -729,14 +759,11 @@ true
 "" ""
 PENS
 "Mean" 1.0 0 -16777216 true "" "plot mean [eric] of ops-nodes with [node-jurisdiction != \"decentralized\"]"
-"Currency 0" 1.0 0 -13840069 true "" "plot item 0 [eric] of ops-nodes with [who = 0]"
-"Currency 1" 1.0 0 -13791810 true "" "plot item 0 [eric] of ops-nodes with [who = 1]"
-"Currency 2" 1.0 0 -1184463 true "" "plot item 0 [eric] of ops-nodes with [who = 2]"
 
 PLOT
 789
 148
-1134
+1131
 289
 average soil health over time
 NIL
@@ -750,9 +777,42 @@ true
 "" ""
 PENS
 "Mean" 1.0 0 -16777216 true "" "plot mean [soil-health] of patches"
-"Jurisdiction 0" 1.0 0 -13840069 true "" "plot mean [soil-health] of patches with [jurisdiction = 0]"
-"Jurisdiction 1" 1.0 0 -13791810 true "" "plot mean [soil-health] of patches with [jurisdiction = 1]"
-"Jurisidiction 2" 1.0 0 -1184463 true "" "plot mean [soil-health] of patches with [jurisdiction = 2]"
+
+SLIDER
+1136
+408
+1308
+441
+max-soil-health
+max-soil-health
+50
+200
+150.0
+1
+1
+NIL
+HORIZONTAL
+
+TEXTBOX
+1140
+362
+1290
+404
+once max-soil-health is exceeded, incentive for increasing soil-health is 0 
+11
+0.0
+1
+
+SWITCH
+1146
+299
+1310
+332
+exogenous-shocks?
+exogenous-shocks?
+1
+1
+-1000
 
 @#$#@#$#@
 ## WHAT IS IT?

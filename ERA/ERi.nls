@@ -36,10 +36,10 @@ to ERi.recalculate-ERiE ;called by observer
     ifelse count patches with [ecoregion = curr-eco] = 0 [
       set curr-soil-health 0
     ]  [
-      set curr-soil-health (mean [soil-health] of patches with [ecoregion = curr-eco] / 200)
+      set curr-soil-health min (list 1 ((mean [soil-health] of patches with [ecoregion = curr-eco] - max-soil-health / 2) / max-soil-health / 2)) ;;normalizes worst case to -1 and best case to 1
     ]
     table:put soil-health-table curr-eco curr-soil-health
-    table:put new-ERiE curr-eco (Bezier ((table:get PREVIOUS-SOIL-HEALTH curr-eco)- curr-soil-health) 0 1)
+    table:put new-ERiE curr-eco (Bezier (curr-soil-health) 0 1)
     set eco eco + 1
   ]
   set PREVIOUS-SOIL-HEALTH soil-health-table
@@ -53,7 +53,7 @@ to ERi.recalculate-ERiC ;called by ops-nodes
     set eric-temp eric-temp + ((table:get ERiE (index-to-ecoregion eco)) * (ecoregion-percent (index-to-ecoregion eco) who))
     set eco eco + 1
   ]
-  set ERiC eric-temp
+  if node-jurisdiction != "decentralized" [ set ERiC eric-temp ]
 end
 
 to-report ecoregion-percent [eco jur]
@@ -61,17 +61,11 @@ to-report ecoregion-percent [eco jur]
   report count patches with [Ecoregion = eco and jurisdiction = jur] / count patches with [jurisdiction = jur]
 end
 
-to-report Bezier [unadjusted-erie lower-bound upper-bound] ;https://javascript.info/bezier-curve
+to-report Bezier [unadjusted-erie lower-bound upper-bound] ;https://javascript.info/bezier-curve inputs the soil health and outputs the 
   ;numbers currently hardcoded but we can change that later with sliders
   if unadjusted-erie >= 1 [report 0.3]
   if unadjusted-erie <= -1 [report 10]
   
-;  let t 0
-;  while [ (1 - t) ^ 3 + 0.2 * (1 - t) ^ 2 * t + -3 * (1 - t) * t ^ 2 + -1 * t ^ 3 > unadjusted-erie] [
-;    set t t + 0.01
-;  ]
-;  report 0.3 * (1 - t) ^ 3 + 3 * (1 - t) ^ 2 * t + 0.15 * (1 - t) * t ^ 2 + 10 * t ^ 3
-;  
   let t ((upper-bound - lower-bound) / 2) + lower-bound
   (ifelse precision ((1 - t) ^ 3 + 0.2 * (1 - t) ^ 2 * t + -3 * (1 - t) * t ^ 2 + -1 * t ^ 3) 2 = precision unadjusted-erie 2 [
     report 0.3 * (1 - t) ^ 3 + 3 * (1 - t) ^ 2 * t + 0.15 * (1 - t) * t ^ 2 + 10 * t ^ 3
