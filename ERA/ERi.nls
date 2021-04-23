@@ -1,28 +1,24 @@
 to ERi.recalculate-exchange-rates
-;  show BASE-YEAR-EXCHANGE-RATES
-;  let original-base-year-exchange-rates BASE-YEAR-EXCHANGE-RATES
-  let i (list 0 1 2 3)
-  let ERiC-list table:to-list ERiC ;; [["currency" ERiC][...][...][...]]
-  ;; first foreach loops over sets of exchange rates (so the set of reference currencies)
-  foreach i [ index ->
-    let base-exchange-rates-table item index BASE-YEAR-EXCHANGE-RATES
-    let base-exchange-rates-list table:to-list base-exchange-rates-table ;; [["target currency" exchange rate][...][...][...]]
-    let ERiC-ref last (item index ERiC-list) ;; one number, ERiC of reference currency
-    let new-exchange-rates-list (list)
-  ;; second foreach loops over individual exchange rates within a set
-    let index-counter 0
-    foreach base-exchange-rates-list [ entry ->
-      let currency-name first entry
-      let base-rate last entry ;; 1 reference currency = (base-rate) target currency
-      let ERiC-target last (item index-counter ERiC-list)
-      let multiplier (ERiC-ref / ERiC-target)
-      let new-rate precision (base-rate * multiplier) 4
-      table:put item index CURRENT-EXCHANGE-RATES currency-name new-rate
-      set index-counter (index-counter + 1)
-    ]
+
+  let curr-currency 0
+  while [curr-currency < length CURRENCY-VALUES] [
+    set CURRENCY-VALUES replace-item curr-currency CURRENCY-VALUES [ERiC] of one-of ops-nodes with [who = curr-currency] ;;theres only one, ignore the one-of used to grab the only ops-node
+    set curr-currency curr-currency + 1
   ]
-;  show CURRENT-EXCHANGE-RATES
-;  set BASE-YEAR-EXCHANGE-RATES original-base-year-exchange-rates
+  let base-exchange-rates (list)
+  let currency-row 0
+  let exch-rate table:make
+  while [currency-row < num-jurisdictions + num-decentralized-currencies] [
+    let currency-column 0
+    while [currency-column < num-jurisdictions + num-decentralized-currencies] [
+      let exchange item currency-column CURRENCY-VALUES / item currency-row CURRENCY-VALUES
+      table:put exch-rate currency-column exchange
+      set currency-column currency-column + 1
+    ]
+    set currency-row currency-row + 1
+    set base-exchange-rates lput (copy-table exch-rate) base-exchange-rates
+  ]
+  set BASE-YEAR-EXCHANGE-RATES base-exchange-rates
 end
 
 to ERi.recalculate-ERiE ;called by observer

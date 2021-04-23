@@ -1,16 +1,19 @@
 to core.soil-degradation
 ;; observer runs this procedure for background soil degradation
   ask patches with [soil-health > 1][ 
-    set soil-health (soil-health * (1 - soil-degrade-rate ecoregion))
+    set soil-health (soil-health * (1 - soil-degrade-rate jurisdiction))
     set pcolor scale-color base-color soil-health -200 200
     ]
 end
 
-to-report soil-degrade-rate [ecoregion-input]
+to-report soil-degrade-rate [jurisdiction-input]
 ;; patches use this reporter
 ;; this will eventually be "hard-coded"/taking input from dataset based on eco-agro zones 
-
-  report random-normal avg-soil-deg-rate (avg-soil-deg-rate / 5)
+  let sdr avg-soil-deg-rate
+  ask ops-nodes with [node-jurisdiction = jurisdiction-input] [
+    set sdr soil-degradation-rate
+  ]
+  report sdr
   
 end
 
