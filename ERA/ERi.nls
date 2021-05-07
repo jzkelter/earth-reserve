@@ -1,71 +1,69 @@
 to ERi.recalculate-exchange-rates
-
-  let curr-currency 0
-  while [curr-currency < length CURRENCY-VALUES] [
-    set CURRENCY-VALUES replace-item curr-currency CURRENCY-VALUES [ERiC] of one-of ops-nodes with [who = curr-currency] ;;theres only one, ignore the one-of used to grab the only ops-node
-    set curr-currency curr-currency + 1
+  
+  ask ops-nodes [
+    let id [who] of self
+    set CURRENCY-VALUES replace-item id CURRENCY-VALUES [ERiC] of one-of ops-nodes with [who = id] ;;theres only one, ignore the one-of used to grab the only ops-node
   ]
   let base-exchange-rates (list)
-  let currency-row 0
   let exch-rate table:make
-  while [currency-row < num-jurisdictions + num-decentralized-currencies] [
-    let currency-column 0
-    while [currency-column < num-jurisdictions + num-decentralized-currencies] [
-      let exchange item currency-column CURRENCY-VALUES / item currency-row CURRENCY-VALUES
-      table:put exch-rate currency-column exchange
-      set currency-column currency-column + 1
+  foreach range (num-jurisdictions + num-decentralized-currencies) [ row ->
+    foreach range (num-jurisdictions + num-decentralized-currencies) [ column ->
+      let exchange item 0 [ERiC] of ops-nodes with [who = column] / item 0 [ERiC] of ops-nodes with [who = row]  ;; aka how much currency (column) is valued in terms of currency (row)
+      table:put exch-rate column exchange
     ]
-    set currency-row currency-row + 1
     set base-exchange-rates lput (copy-table exch-rate) base-exchange-rates
   ]
-  set BASE-YEAR-EXCHANGE-RATES base-exchange-rates
+  ifelse BASE-YEAR-EXCHANGE-RATES = 0[ ;pre-definition
+    set BASE-YEAR-EXCHANGE-RATES base-exchange-rates
+  ] [
+    set CURRENT-EXCHANGE-RATES base-exchange-rates
+  ]
 end
+
 
 to ERi.recalculate-ERiE ;called by observer
   let new-ERiE table:make
   let soil-health-table table:make
-  let eco 0
-  let curr-soil-health 0
-  let curr-eco "A"
-  while [eco < num-ecoregions] [
-    set curr-eco (index-to-ecoregion eco)
-    ifelse count patches with [ecoregion = curr-eco] = 0 [
-      set curr-soil-health 0
-    ]  [
-      set curr-soil-health min (list 1 ((mean [soil-health] of patches with [ecoregion = curr-eco] - max-soil-health / 2) / max-soil-health / 2)) ;;normalizes worst case to -1 and best case to 1
-    ]
-    table:put soil-health-table curr-eco curr-soil-health
-    table:put new-ERiE curr-eco (Bezier (curr-soil-health) 0 1)
-    set eco eco + 1
+  foreach range num-ecoregions [ eco ->
+    let eco-name (ERi.index-to-ecoregion eco)
+    let curr-soil-health min (list 1 ((mean [soil-health] of patches with [ecoregion = eco-name] - max-soil-health / 2) / max-soil-health / 2)) ;;normalizes worst case to -1 and best case to 1
+    table:put soil-health-table eco-name curr-soil-health
+    table:put new-ERiE eco-name (Bezier (curr-soil-health) 0 1)
   ]
   set PREVIOUS-SOIL-HEALTH soil-health-table
   set ERiE new-ERiE
 end
 
 to ERi.recalculate-ERiC ;called by ops-nodes
-  let eco 0
   let eric-temp 0
-  while [eco < num-ecoregions] [
-    set eric-temp eric-temp + ((table:get ERiE (index-to-ecoregion eco)) * (ecoregion-percent (index-to-ecoregion eco) who))
-    set eco eco + 1
+  ;; we want decentralized ERiC equal to the mean of all other ERiC (we currently lack currency of transaction data, so we assume decentralized is equally responsible for ecoregion change)
+  ifelse node-jurisdiction = "decentralized" [
+    ask CENTRALIZED-OPS-NODES [
+      set eric-temp eric-temp + (ERiC / num-jurisdictions)
+    ]
+  ] [
+    foreach range num-ecoregions [ eco ->
+      let eco-name (ERi.index-to-ecoregion eco)
+      set eric-temp eric-temp + ((table:get ERiE eco-name) * (ecoregion-percent-of-jurisdiction eco-name who))
+    ]
   ]
-  if node-jurisdiction != "decentralized" [ set ERiC eric-temp ]
+  set ERiC eric-temp    
 end
 
-to-report ecoregion-percent [eco jur]
+to-report ecoregion-percent-of-jurisdiction [eco jur]
   if count patches with [jurisdiction = jur] = 0 [report 0] ;; this is a catch all for decentralized op-node and op-nodes with no patches
   report count patches with [Ecoregion = eco and jurisdiction = jur] / count patches with [jurisdiction = jur]
 end
 
-to-report Bezier [unadjusted-erie lower-bound upper-bound] ;https://javascript.info/bezier-curve inputs the soil health and outputs the 
+to-report Bezier [unadjusted-erie lower-bound upper-bound] ;https://javascript.info/bezier-curve inputs the soil health and outputs the ERiE
   ;numbers currently hardcoded but we can change that later with sliders
   if unadjusted-erie >= 1 [report 0.3]
   if unadjusted-erie <= -1 [report 10]
   
   let t ((upper-bound - lower-bound) / 2) + lower-bound
-  (ifelse precision ((1 - t) ^ 3 + 0.2 * (1 - t) ^ 2 * t + -3 * (1 - t) * t ^ 2 + -1 * t ^ 3) 2 = precision unadjusted-erie 2 [
-    report 0.3 * (1 - t) ^ 3 + 3 * (1 - t) ^ 2 * t + 0.15 * (1 - t) * t ^ 2 + 10 * t ^ 3
-  ]  (1 - t) ^ 3 + 0.2 * (1 - t) ^ 2 * t + -3 * (1 - t) * t ^ 2 + -1 * t ^ 3 > unadjusted-erie [ 
+  (ifelse precision (Bezier-function t) 2 = precision unadjusted-erie 2 [
+    report 0.3 * (1 - t) ^ 3 + 3 * (1 - t) ^ 2 * t + 0.15 * (1 - t) * t ^ 2 + 10 * t ^ 3           ;inverse Bezier function to "unwravel" the calculation for t 
+  ]  (Bezier-function t) > unadjusted-erie [ 
     report (Bezier unadjusted-erie t upper-bound)
   ]  [
     report (Bezier unadjusted-erie lower-bound t)
@@ -74,16 +72,17 @@ to-report Bezier [unadjusted-erie lower-bound upper-bound] ;https://javascript.i
   
 end
 
+to-report Bezier-function [t]
+  report ((1 - t) ^ 3 + 0.2 * (1 - t) ^ 2 * t + -3 * (1 - t) * t ^ 2 + -1 * t ^ 3)
+end
 
-to-report index-to-ecoregion [index]
+to-report ERi.index-to-ecoregion [index]
   report (item index "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 end
 
 to-report convert-currency [origin-currency target-currency amount-in-origin-currency] ;; currencies should be numbers corresponding the "who" of the ops-nodes
   let origin-currency-index origin-currency
   let target-currency-index target-currency 
-  if origin-currency-index = "decentralized" [set origin-currency-index 3]
-  if target-currency-index = "decentralized" [set target-currency-index 3]
   let current-exchange-rates-in-origin table:to-list item origin-currency-index CURRENT-EXCHANGE-RATES
   let relevant-exchange-rate last item target-currency-index current-exchange-rates-in-origin ;; 1 unit origin = X units target
   report (amount-in-origin-currency * relevant-exchange-rate)
