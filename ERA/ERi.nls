@@ -13,7 +13,7 @@ to ERi.recalculate-exchange-rates
     ]
     set base-exchange-rates lput (copy-table exch-rate) base-exchange-rates
   ]
-  ifelse BASE-YEAR-EXCHANGE-RATES = 0[ ;pre-definition
+  ifelse BASE-YEAR-EXCHANGE-RATES = 0[ ;defined at 0 at initialization
     set BASE-YEAR-EXCHANGE-RATES base-exchange-rates
   ] [
     set CURRENT-EXCHANGE-RATES base-exchange-rates

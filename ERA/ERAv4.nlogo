@@ -18,9 +18,6 @@ globals [
   BASE-YEAR-EXCHANGE-RATES
   CURRENT-EXCHANGE-RATES
   CURRENCY-VALUES              ;; List of currency valuations (not based on any metric)
-  c0                           ;; These constants control the functions that relate rent, soil health, and PI investment.
-  c1
-  c2
   PEN-COLORS                   ;; Correspond to the pen colors on the graph
 ]
 
@@ -49,13 +46,14 @@ ops-nodes-own [
   PIs-with-new-projects-for-me  ;; a new list of turtles every tick
   ERiC
   soil-degradation-rate ;;different jurisdictions have different soil-degradation rates
+  project-price-multiplier ;;different jurisdictions have different project prices. This multiplier functions to inflate or deflate the price of all projects within a jurisdictio
+  c0                           ;; These constants control the functions that relate rent, soil health, and PI investment.
+  c1
+  c2
 ]
 
 to setup
   clear-all
-  set c0 50
-  set c1 500
-  set c2 10
   setup-ops-nodes
   setup-proj-investors
   setup-patches
@@ -82,34 +80,40 @@ end
 
 to setup-ops-nodes
   set CURRENCY-VALUES (list)
-    ask n-of num-jurisdictions patches [
-      sprout-ops-nodes 1 [
-        set color 47
-        set shape "Circle (2)"
-        set size 2
-        set node-jurisdiction [who] of self
-        set ERiC 1
-        set CURRENCY-VALUES lput ERiC CURRENCY-VALUES
-        set label word [who] of self "   " ;;spacing for formatting
-        set label-color black
-        set soil-degradation-rate random-normal avg-soil-deg-rate (avg-soil-deg-rate / 5)    ;;initializing random to simulate policy differences between jurisdictions
-        output-print word word "Jur " ([who] of self)  word "   Soil-Deg-Rate " (precision soil-degradation-rate 5)
-
-      ]
-    ]
-
-    create-ops-nodes num-decentralized-currencies [  ;; this is standing in for the decentralized ops-node (like cryptos)
-      set color white
+  ask n-of num-jurisdictions patches [
+    sprout-ops-nodes 1 [
+      set color 47
       set shape "Circle (2)"
       set size 2
-      setxy -16.3  (16.3 - 2.5 * (who - num-jurisdictions))
-      set node-jurisdiction "decentralized"
-      set ERiC random-normal 1 0.1
+      set node-jurisdiction [who] of self
+      set ERiC 1
       set CURRENCY-VALUES lput ERiC CURRENCY-VALUES
-    ]
+      set label word [who] of self "   " ;;spacing for formatting
+      set label-color black
+      set soil-degradation-rate random-normal avg-soil-deg-rate soil-deg-rate-stdev    ;;initializing random to simulate policy differences between jurisdictions
+      output-print word word "Jur " ([who] of self)  word "   Soil-Deg-Rate " (precision soil-degradation-rate 5)
+      set c0 random-normal 50 10
+      set c1 random-normal 500 100
+      set c2 random-normal 10 2
+   ]
+ ]
+ create-ops-nodes num-decentralized-currencies [  ;; this is standing in for the decentralized ops-node (like cryptos)
+    set color white
+    set shape "Circle (2)"
+    set size 2
+    setxy -16.3  (16.3 - 2.5 * (who - num-jurisdictions))
+    set node-jurisdiction "decentralized"
+    set ERiC random-normal 1 0.1
+    set CURRENCY-VALUES lput ERiC CURRENCY-VALUES
+    set c0 random-normal 50 1
+    set c1 random-normal 500 10
+    set c2 random-normal 10 0.5
+  ]
 
   ask ops-nodes [
     set PIs-with-new-projects-for-me (list)
+    set project-price-multiplier random-normal 1 0.2    ;;arbitrary distribution, we can set the stdev to a slider later if so desired
+    output-print word word "Currency " ([who] of self)  word "   Project-Multiplier " (precision project-price-multiplier 5)
   ]
   set CENTRALIZED-OPS-NODES ops-nodes with [node-jurisdiction != "decentralized"]
   set DECENTRALIZED-OPS-NODES ops-nodes with [node-jurisdiction = "decentralized"]
@@ -257,22 +261,36 @@ to update-graphs
 end
 
 to go
-  let base-year-reset-time 84 ;;7 years = 84 months
+  let base-year-reset-time 84 ;;7 years = 84 months = 84 ticks
   if (ticks > 0 and ticks mod base-year-reset-time = 0) [
-    ERi.recalculate-ERiE
-    ask CENTRALIZED-OPS-NODES [
-      ERi.recalculate-ERiC
-    ]
-    ask DECENTRALIZED-OPS-NODES [ ;;temporary solution so that decentralized can be tethered to centralized eric
-      ERi.recalculate-ERiC
-    ]
+
     ERi.recalculate-exchange-rates
   ]
+  ask CENTRALIZED-OPS-NODES [
+      ERi.recalculate-ERiC
+    ]
+  ask DECENTRALIZED-OPS-NODES [ ;;temporary solution so that decentralized can be tethered to centralized eric
+    ERi.recalculate-ERiC
+  ]
+  ERi.recalculate-ERiE
   update-graphs
 
   if (ticks > 0 and ticks mod 10 = 0) [
     core.soil-degradation
   ]
+
+  let prob-exogenous-shock 0.03 ;;arbitrary, we can add in a slider for these later if we want
+  let exogenous-shock-impact 80
+  let exogenous-shock-size 2
+
+  if exogenous-shocks? and (random-float 1 < prob-exogenous-shock)[
+    ask one-of patches [
+      ask patches in-radius exogenous-shock-size [
+        set soil-health max (list 10 (soil-health - exogenous-shock-impact))
+      ]
+    ]
+  ]
+
 
   ask proj-investors [
     core.update-or-complete-projects
@@ -556,9 +574,9 @@ PENS
 
 SLIDER
 1133
-112
+78
 1276
-145
+111
 avg-soil-deg-rate
 avg-soil-deg-rate
 0
@@ -643,7 +661,7 @@ num-decentralized-currencies
 num-decentralized-currencies
 0
 5
-1.0
+2.0
 1
 1
 NIL
@@ -713,9 +731,35 @@ once max-soil-health is exceeded, incentive for increasing soil-health is 0
 OUTPUT
 1134
 148
-1380
+1473
 270
 11
+
+SWITCH
+15
+125
+165
+158
+exogenous-shocks?
+exogenous-shocks?
+0
+1
+-1000
+
+SLIDER
+1133
+113
+1278
+146
+soil-deg-rate-stdev
+soil-deg-rate-stdev
+0
+0.02
+0.004
+0.001
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
