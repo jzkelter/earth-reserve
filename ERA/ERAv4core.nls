@@ -1,9 +1,13 @@
 to core.soil-degradation
 ;; observer runs this procedure for background soil degradation
-  ask patches with [soil-health > 1][ 
-    set soil-health (soil-health * (1 - soil-degrade-rate jurisdiction))
-    set pcolor scale-color base-color soil-health -200 200
+  
+  let project-assurance-time-frame 900 ;; 75 years * 12 months 
+  ask patches with [soil-health > 1] [
+    if (ticks > (last-project-date + project-assurance-time-frame) and last-project-date != -1) [
+      set soil-health (soil-health * (1 - soil-degrade-rate jurisdiction))
+      set pcolor scale-color base-color soil-health -200 200
     ]
+  ]
 end
 
 to-report soil-degrade-rate [jurisdiction-input]
@@ -331,6 +335,7 @@ to core.update-patch-stats [project]
     set proj-counter (proj-counter + 1)
     set proj-here? false
     set pcolor scale-color base-color soil-health -200 200
+    set last-project-date ticks
   ]
 end
 

@@ -28,6 +28,7 @@ patches-own [
   proj-here?
   base-color     ;; based on nearest centralized operations node
   ecoregion
+  last-project-date ;; the last tick when a project has been completed, -1 if patch has not had a project completed
 ]
 
 proj-investors-own [
@@ -112,7 +113,7 @@ to setup-ops-nodes
 
   ask ops-nodes [
     set PIs-with-new-projects-for-me (list)
-    set project-price-multiplier random-normal 1 0.2    ;;arbitrary distribution, we can set the stdev to a slider later if so desired
+    set project-price-multiplier max (list 0 random-normal 1 0.4)    ;;arbitrary distribution, we can set the stdev to a slider later if so desired
     output-print word word "Currency " ([who] of self)  word "   Project-Multiplier " (precision project-price-multiplier 5)
   ]
   set CENTRALIZED-OPS-NODES ops-nodes with [node-jurisdiction != "decentralized"]
@@ -156,6 +157,7 @@ to setup-patches
     set soil-health (1 + random 100)
     set jurisdiction [node-jurisdiction] of min-one-of CENTRALIZED-OPS-NODES [distance myself]
     set proj-here? false
+    set last-project-date -1 ;;indicates no project has been done on this patch
   ]
   let eco-boundaries n-of (num-ecoregions - 1) (range min-pycor (max-pycor - 1) ) ;;guarantees no ecoregions without any patches
   let region-colors n-of num-ecoregions base-colors
@@ -260,6 +262,21 @@ to update-graphs
   ]
 end
 
+to exogenous-shock
+  let prob-exogenous-shock 0.03 ;;arbitrary, we can add in a slider for these later if we want
+  let exogenous-shock-impact 80
+  let exogenous-shock-size 2
+
+  if exogenous-shocks? and (random-float 1 < prob-exogenous-shock)[
+    ask one-of patches [
+      ask patches in-radius exogenous-shock-size [
+        set soil-health max (list 10 (soil-health - exogenous-shock-impact))
+      ]
+    ]
+  ]
+end
+
+
 to go
   let base-year-reset-time 84 ;;7 years = 84 months = 84 ticks
   if (ticks > 0 and ticks mod base-year-reset-time = 0) [
@@ -279,17 +296,10 @@ to go
     core.soil-degradation
   ]
 
-  let prob-exogenous-shock 0.03 ;;arbitrary, we can add in a slider for these later if we want
-  let exogenous-shock-impact 80
-  let exogenous-shock-size 2
+  exogenous-shock
 
-  if exogenous-shocks? and (random-float 1 < prob-exogenous-shock)[
-    ask one-of patches [
-      ask patches in-radius exogenous-shock-size [
-        set soil-health max (list 10 (soil-health - exogenous-shock-impact))
-      ]
-    ]
-  ]
+
+
 
 
   ask proj-investors [
