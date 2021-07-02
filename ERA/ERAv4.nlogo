@@ -12,9 +12,13 @@ globals [
   TIME-NOW
   ALL-DEPOSIT-RECEIPTS
   TOTAL-AMOUNT-MONEY
-  ERiC
+  PREVIOUS-SOIL-HEALTH
+  ERiE
+  INTERNATIONAL-COT
   BASE-YEAR-EXCHANGE-RATES
   CURRENT-EXCHANGE-RATES
+  CURRENCY-VALUES              ;; List of currency valuations (not based on any metric)
+  PEN-COLORS                   ;; Correspond to the pen colors on the graph
 ]
 
 patches-own [
@@ -24,11 +28,12 @@ patches-own [
   proj-here?
   base-color     ;; based on nearest centralized operations node
   ecoregion
+  last-project-date ;; the last tick when a project has been completed, -1 if patch has not had a project completed
 ]
 
 proj-investors-own [
   home-jurisdiction
-  cash
+  cash                 ;; a table holding cash in every relative currency
   potential-project    ;; a table that starts out empty every tick
   current-projects     ;; a list of tables
   ability              ;; number that represents project investors ability, range 0.1 to 1
@@ -40,6 +45,12 @@ proj-investors-own [
 ops-nodes-own [
   node-jurisdiction
   PIs-with-new-projects-for-me  ;; a new list of turtles every tick
+  ERiC
+  soil-degradation-rate ;;different jurisdictions have different soil-degradation rates
+  project-price-multiplier ;;different jurisdictions have different project prices. This multiplier functions to inflate or deflate the price of all projects within a jurisdictio
+  c0                           ;; These constants control the functions that relate rent, soil health, and PI investment.
+  c1
+  c2
 ]
 
 to setup
@@ -49,11 +60,14 @@ to setup
   setup-patches
   set TIME-NOW time:anchor-to-ticks (time:create "2000-01-01") 1 "month"
   set ALL-DEPOSIT-RECEIPTS (list)
-  setup-base-yr-exch-rate
-  set CURRENT-EXCHANGE-RATES map copy-table BASE-YEAR-EXCHANGE-RATES ;; because ERiCs aren't changing right now
-  setup-ERiC
+  ERi.recalculate-exchange-rates
+  set CURRENT-EXCHANGE-RATES map copy-table BASE-YEAR-EXCHANGE-RATES
   set TOTAL-AMOUNT-MONEY sum [PI-total-cash-held-in-ref global-ref-currency] of proj-investors
   reset-ticks
+  setup-ERiE
+  setup-international-COT
+  set PEN-COLORS n-of (num-jurisdictions + num-decentralized-currencies) base-colors
+  update-graphs
 end
 
 to-report copy-table [ orig ]
@@ -64,30 +78,48 @@ to-report copy-table [ orig ]
   report copy
 end
 
+
 to setup-ops-nodes
-  foreach n-of 3 base-colors [ c ->   ;; 3 is placeholder for number of jurisdictions
-    ask one-of patches [
-      sprout-ops-nodes 1 [
-        set color c
-        set shape "Circle (2)"
-        set size 2
-        set node-jurisdiction [who] of self
-      ]
-    ]
-  ]
-  create-ops-nodes 1 [  ;; this is standing in for the decentralized ops-node (like cryptos)
+  set CURRENCY-VALUES (list)
+  ask n-of num-jurisdictions patches [
+    sprout-ops-nodes 1 [
+      set color 47
+      set shape "Circle (2)"
+      set size 2
+      set node-jurisdiction [who] of self
+      set ERiC 1
+      set CURRENCY-VALUES lput ERiC CURRENCY-VALUES
+      set label word [who] of self "   " ;;spacing for formatting
+      set label-color black
+      set soil-degradation-rate random-normal avg-soil-deg-rate soil-deg-rate-stdev    ;;initializing random to simulate policy differences between jurisdictions
+      output-print word word "Jur " ([who] of self)  word "   Soil-Deg-Rate " (precision soil-degradation-rate 5)
+      set c0 random-normal 50 10
+      set c1 random-normal 500 100
+      set c2 random-normal 10 2
+   ]
+ ]
+ create-ops-nodes num-decentralized-currencies [  ;; this is standing in for the decentralized ops-node (like cryptos)
     set color white
     set shape "Circle (2)"
     set size 2
-    setxy random-xcor random-ycor
+    setxy -16.3  (16.3 - 2.5 * (who - num-jurisdictions))
     set node-jurisdiction "decentralized"
+    set ERiC random-normal 1 0.1
+    set CURRENCY-VALUES lput ERiC CURRENCY-VALUES
+    set c0 random-normal 50 1
+    set c1 random-normal 500 10
+    set c2 random-normal 10 0.5
   ]
+
   ask ops-nodes [
     set PIs-with-new-projects-for-me (list)
+    set project-price-multiplier max (list 0 random-normal 1 0.4)    ;;arbitrary distribution, we can set the stdev to a slider later if so desired
+    output-print word word "Currency " ([who] of self)  word "   Project-Multiplier " (precision project-price-multiplier 5)
   ]
   set CENTRALIZED-OPS-NODES ops-nodes with [node-jurisdiction != "decentralized"]
   set DECENTRALIZED-OPS-NODES ops-nodes with [node-jurisdiction = "decentralized"]
   set NODE-MIN-PROJECT-SIZE 10 ;; arbitrary for now, can be slider or hooked to something later
+
 end
 
 
@@ -110,107 +142,165 @@ end
 
 to setup-proj-investor-cash
   let cash-table table:make
-  table:put cash-table "0" 0
-  table:put cash-table "1" 0
-  table:put cash-table "2" 0
-  table:put cash-table "other" 0
-  (ifelse
-    home-jurisdiction = 0 [
-      table:put cash-table "0" round random-normal 100 25
-    ]
-    home-jurisdiction = 1 [
-      table:put cash-table "1" round random-normal 100 25
-    ]
-    home-jurisdiction = 2 [
-      table:put cash-table "2" round random-normal 100 25
-    ]
-  )
+  foreach range (num-jurisdictions + num-decentralized-currencies) [ currency -> ;proj-investors never start with home jurisidiction = decentralized, but they can convert cash into the currencies later.
+    (ifelse currency = home-jurisdiction [
+      table:put cash-table home-jurisdiction round random-normal 100 25
+    ]  [
+      table:put cash-table currency 0
+    ])
+  ]
   set cash cash-table
 end
 
 to setup-patches
-  let ecoregion-boundary-1 random (world-height / 2)
-  let ecoregion-boundary-2 random (world-height / 2)
   ask patches [
     set soil-health (1 + random 100)
     set jurisdiction [node-jurisdiction] of min-one-of CENTRALIZED-OPS-NODES [distance myself]
-    set base-color [color] of one-of CENTRALIZED-OPS-NODES with [who = [jurisdiction] of myself]
-    set pcolor scale-color base-color soil-health -200 200
     set proj-here? false
-    (ifelse
-      pycor <= min-pycor + ecoregion-boundary-1 [
-        set ecoregion "A"
-      ]
-      pycor >= max-pycor - ecoregion-boundary-2 [
-        set ecoregion "C"
-      ][ ;; else
-        set ecoregion "B"
-      ]
-    )
+    set last-project-date -1 ;;indicates no project has been done on this patch
   ]
-  ask patches with [ecoregion = "A"][
-    sprout 1 [
-      set color 3
-      set shape "x"
-      stamp
-      die
+  let eco-boundaries n-of (num-ecoregions - 1) (range min-pycor (max-pycor - 1) ) ;;guarantees no ecoregions without any patches
+  let region-colors n-of num-ecoregions base-colors
+  foreach range (num-ecoregions - 1) [ eco ->
+    let curr-color (item eco region-colors)
+    ask patches with [pycor <= (item eco eco-boundaries) and ecoregion = 0] [
+      set ecoregion (ERi.index-to-ecoregion eco)
+      set base-color curr-color
+      set pcolor scale-color base-color soil-health -200 200
     ]
   ]
-  ask patches with [ecoregion = "C"][
-    sprout 1 [
-      set color 3
-      set shape "dot"
-      stamp
-      die
+  ask patches with [ecoregion = 0] [ ;;last ecoregion isn't bounded above by a randomly generated eco-boundary
+    set ecoregion ERi.index-to-ecoregion (num-ecoregions - 1)
+    set base-color item (num-ecoregions - 1) region-colors
+    set pcolor scale-color base-color soil-health -200 200
+  ]
+
+  ;;set up jurisdictional borders
+  ask patches with [pxcor != max-pxcor] [
+    if jurisdiction != [jurisdiction] of patch-at 1 0 [
+      sprout 1 [
+        set color black
+        set heading 0
+        set xcor pxcor + 0.5
+        set shape "line"
+        __set-line-thickness 0.15
+        stamp
+        die
+      ]
     ]
+  ]
+  ask patches with [pycor != max-pycor] [
+    if jurisdiction != [jurisdiction] of patch-at 0 1 [
+      sprout 1 [
+        set color black
+        set heading 90
+        set ycor pycor + 0.5
+        set shape "line"
+        __set-line-thickness 0.15
+        stamp
+        die
+      ]
+    ]
+  ]
+
+  ;;set up world borders
+  crt 1 [
+    setxy (min-pxcor - 0.4) (min-pycor - 0.4)
+    set heading 0
+    set color black
+    set pen-size 2
+    pen-down
+    repeat 2 [
+      fd world-height - 0.2
+      rt 90
+      fd world-width - 0.2
+      rt 90
+    ]
+  ]
+
+end
+
+to setup-ERiE
+  let soil-health-table table:make
+  let erie-table table:make
+  foreach range num-ecoregions [ eco ->
+    let eco-name (ERi.index-to-ecoregion eco)
+    table:put soil-health-table eco-name mean [soil-health] of patches with [ecoregion = eco-name]
+    table:put erie-table eco-name 1
+  ]
+  set PREVIOUS-SOIL-HEALTH soil-health-table
+  set ERiE erie-table
+end
+
+to setup-international-COT  ;;currently unused but can be implemented later (would only be useful if we have a feedback loop where economic behavior is attracted by devaluing the currency (backwords intuition)
+  let cot-table table:make
+  ask ops-nodes [
+    table:put cot-table who random-normal 1000 100 ;arbitrary distribution
+  ]
+  if (calibration = "2-dominant") [
+    table:put cot-table 0 random-normal 4000 400
+    table:put cot-table 1 random-normal 4000 400
+  ]
+  set INTERNATIONAL-COT cot-table
+end
+
+
+
+to update-graphs
+  ask ops-nodes [
+    let id [who] of self
+    if (node-jurisdiction != "decentralized") [
+      set-current-plot "average soil health over time"
+      create-temporary-plot-pen word "Jurisdiction" id
+      set-plot-pen-color item id PEN-COLORS
+      plot mean [soil-health] of patches with [jurisdiction = id]
+    ]
+    set-current-plot "ERiC over time" ;;we run this every time though
+    create-temporary-plot-pen word "Currency" id
+    set-plot-pen-color item id PEN-COLORS
+    plot ERiC
   ]
 end
 
-to setup-ERiC
-  let eric-table table:make
-  table:put eric-table "ERiC 0" 1.2
-  table:put eric-table "ERiC 1" 0.8
-  table:put eric-table "ERiC 2" 1.5
-  table:put eric-table "ERiC other" 1
-  set ERiC eric-table
+to exogenous-shock
+  let prob-exogenous-shock 0.03 ;;arbitrary, we can add in a slider for these later if we want
+  let exogenous-shock-impact 80
+  let exogenous-shock-size 2
+
+  if exogenous-shocks? and (random-float 1 < prob-exogenous-shock)[
+    ask one-of patches [
+      ask patches in-radius exogenous-shock-size [
+        set soil-health max (list 10 (soil-health - exogenous-shock-impact))
+      ]
+    ]
+  ]
 end
-
-to setup-base-yr-exch-rate
-  let exch-rate-0 table:make
-  table:put exch-rate-0 "0" 1
-  table:put exch-rate-0 "1" 3
-  table:put exch-rate-0 "2" 0.8
-  table:put exch-rate-0 "other" 1.2
-
-  let exch-rate-1 table:make
-  table:put exch-rate-1 "0" 0.67
-  table:put exch-rate-1 "1" 1
-  table:put exch-rate-1 "2" 2
-  table:put exch-rate-1 "other" 1.8
-
-  let exch-rate-2 table:make
-  table:put exch-rate-2 "0" 1.25
-  table:put exch-rate-2 "1" 0.5
-  table:put exch-rate-2 "2" 1
-  table:put exch-rate-2 "other" 1.6
-
-  let exch-rate-other table:make
-  table:put exch-rate-other "0" 0.83
-  table:put exch-rate-other "1" 0.56
-  table:put exch-rate-other "2" 0.625
-  table:put exch-rate-other "other" 1
-
-  set BASE-YEAR-EXCHANGE-RATES (list exch-rate-0 exch-rate-1 exch-rate-2 exch-rate-other)
-end
-
 
 
 to go
+  let base-year-reset-time 84 ;;7 years = 84 months = 84 ticks
+  if (ticks > 0 and ticks mod base-year-reset-time = 0) [
+
+    ERi.recalculate-exchange-rates
+  ]
+  ask CENTRALIZED-OPS-NODES [
+      ERi.recalculate-ERiC
+    ]
+  ask DECENTRALIZED-OPS-NODES [ ;;temporary solution so that decentralized can be tethered to centralized eric
+    ERi.recalculate-ERiC
+  ]
+  ERi.recalculate-ERiE
+  update-graphs
+
   if (ticks > 0 and ticks mod 10 = 0) [
     core.soil-degradation
   ]
 
-  ERi.recalculate-exchange-rates
+  exogenous-shock
+
+
+
+
 
   ask proj-investors [
     core.update-or-complete-projects
@@ -238,7 +328,6 @@ to go
       RED.check-if-owner-wants-to-redeem
     ]
   ]
-
   tick
 end
 
@@ -251,18 +340,7 @@ to-report number-deposit-receipts-owned
 end
 
 to-report PI-total-cash-held-in-ref [ref-currency] ;; takes number (not string) as input
-  let currency-0-held table:get cash "0"
-  let currency-1-held table:get cash "1"
-  let currency-2-held table:get cash "2"
-  let currency-other-held table:get cash "other"
-
-  let currency-0-held-in-ref convert-currency 0 ref-currency currency-0-held
-  let currency-1-held-in-ref convert-currency 1 ref-currency currency-1-held
-  let currency-2-held-in-ref convert-currency 2 ref-currency currency-2-held
-  let currency-other-held-in-ref convert-currency "other" ref-currency currency-other-held
-
-  let total-cash-held-in-ref (currency-0-held-in-ref + currency-1-held-in-ref + currency-2-held-in-ref + currency-other-held-in-ref)
-  report precision total-cash-held-in-ref 4
+  report sum map [curr-currency -> (convert-currency curr-currency ref-currency table:get cash curr-currency)] range (num-jurisdictions + num-decentralized-currencies)
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
@@ -293,10 +371,10 @@ ticks
 30.0
 
 BUTTON
-14
-17
-80
-50
+16
+277
+82
+310
 NIL
 setup
 NIL
@@ -310,10 +388,10 @@ NIL
 1
 
 BUTTON
-96
-17
-177
-50
+98
+277
+179
+310
 go once
 go
 NIL
@@ -327,10 +405,10 @@ NIL
 1
 
 BUTTON
-191
-17
-254
-50
+193
+277
+256
+310
 NIL
 go
 T
@@ -345,9 +423,9 @@ NIL
 
 SLIDER
 12
-61
+10
 164
-94
+43
 num-proj-investors
 num-proj-investors
 0
@@ -359,10 +437,10 @@ NIL
 HORIZONTAL
 
 PLOT
-16
-180
-309
-309
+15
+314
+308
+443
 projects completed per investor distribution
 NIL
 NIL
@@ -377,10 +455,10 @@ PENS
 "default" 1.0 1 -16777216 true "" "histogram [completed-projects] of proj-investors\n"
 
 PLOT
-16
-316
-310
-460
+15
+450
+309
+594
 projects completed per patch distribution
 NIL
 NIL
@@ -393,51 +471,6 @@ false
 "" "if min [proj-counter] of patches < max [proj-counter] of patches[\nset-plot-x-range min [proj-counter] of patches max [proj-counter] of patches]"
 PENS
 "default" 1.0 1 -16777216 true "" "histogram [proj-counter] of patches"
-
-SLIDER
-396
-465
-534
-498
-c0
-c0
-0
-100
-50.0
-1
-1
-NIL
-HORIZONTAL
-
-SLIDER
-396
-502
-533
-535
-c1
-c1
-300
-700
-500.0
-1
-1
-NIL
-HORIZONTAL
-
-SLIDER
-396
-540
-533
-573
-c2
-c2
-0
-100
-10.0
-1
-1
-NIL
-HORIZONTAL
 
 PLOT
 788
@@ -459,24 +492,24 @@ PENS
 
 SLIDER
 12
-97
+48
 164
-130
+81
 tax-rate
 tax-rate
 0
 0.05
-0.0055
+0.0058
 0.0001
 1
 NIL
 HORIZONTAL
 
 PLOT
-792
-297
-1047
-447
+1054
+452
+1309
+602
 num DRs in market over time
 NIL
 NIL
@@ -490,29 +523,11 @@ false
 PENS
 "default" 1.0 0 -16777216 true "" "plot number-deposit-receipts-in-market"
 
-PLOT
-789
-148
-1046
-289
-average soil health over time
-NIL
-NIL
-0.0
-10.0
-0.0
-10.0
-true
-false
-"" ""
-PENS
-"default" 1.0 0 -16777216 true "" "plot mean [soil-health] of patches"
-
 MONITOR
-635
-459
-763
-504
+1136
+279
+1264
+324
 total deposit receipts
 length ALL-DEPOSIT-RECEIPTS
 17
@@ -521,9 +536,9 @@ length ALL-DEPOSIT-RECEIPTS
 
 SWITCH
 12
-138
-168
-171
+87
+164
+120
 financial-athletics?
 financial-athletics?
 0
@@ -549,10 +564,10 @@ PENS
 "default" 1.0 1 -16777216 true "" "histogram number-deposit-receipts-owned"
 
 PLOT
-16
-467
-384
-608
+331
+454
+762
+595
 total money in system over time (in ref currency)
 NIL
 NIL
@@ -567,21 +582,11 @@ PENS
 "total money" 1.0 0 -16777216 true "" "plot TOTAL-AMOUNT-MONEY"
 "total PI money" 1.0 0 -13840069 true "" "plot sum [PI-total-cash-held-in-ref global-ref-currency] of proj-investors"
 
-TEXTBOX
-545
-525
-730
-572
-These constants control the functions that relate rent, soil health, and PI investment.\n
-11
-0.0
-1
-
 SLIDER
-173
-62
-316
-95
+1133
+78
+1276
+111
 avg-soil-deg-rate
 avg-soil-deg-rate
 0
@@ -594,14 +599,14 @@ HORIZONTAL
 
 SLIDER
 173
-100
+10
 318
-133
+43
 n-drs-checked
 n-drs-checked
 0
 20
-17.0
+20.0
 1
 1
 NIL
@@ -609,13 +614,162 @@ HORIZONTAL
 
 CHOOSER
 174
-136
-317
-181
+46
+318
+91
 global-ref-currency
 global-ref-currency
 0 1 2 3
 0
+
+SLIDER
+15
+163
+165
+196
+num-jurisdictions
+num-jurisdictions
+2
+10
+3.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+15
+201
+165
+234
+num-ecoregions
+num-ecoregions
+2
+10
+4.0
+1
+1
+NIL
+HORIZONTAL
+
+CHOOSER
+174
+97
+319
+142
+calibration
+calibration
+"custom" "2-dominant"
+0
+
+SLIDER
+15
+240
+165
+273
+num-decentralized-currencies
+num-decentralized-currencies
+0
+5
+2.0
+1
+1
+NIL
+HORIZONTAL
+
+PLOT
+788
+296
+1130
+446
+ERiC over time
+NIL
+NIL
+0.0
+10.0
+0.0
+3.0
+true
+true
+"" ""
+PENS
+"Mean" 1.0 0 -16777216 true "" "plot mean [eric] of ops-nodes with [node-jurisdiction != \"decentralized\"]"
+
+PLOT
+789
+148
+1131
+289
+average soil health over time
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+true
+"" ""
+PENS
+"Mean" 1.0 0 -16777216 true "" "plot mean [soil-health] of patches"
+
+SLIDER
+171
+201
+312
+234
+max-soil-health
+max-soil-health
+50
+200
+50.0
+1
+1
+NIL
+HORIZONTAL
+
+TEXTBOX
+175
+155
+325
+197
+once max-soil-health is exceeded, incentive for increasing soil-health is 0 
+11
+0.0
+1
+
+OUTPUT
+1134
+148
+1473
+270
+11
+
+SWITCH
+15
+125
+165
+158
+exogenous-shocks?
+exogenous-shocks?
+0
+1
+-1000
+
+SLIDER
+1133
+113
+1278
+146
+soil-deg-rate-stdev
+soil-deg-rate-stdev
+0
+0.02
+0.004
+0.001
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?

@@ -1,25 +1,24 @@
 to core.soil-degradation
 ;; observer runs this procedure for background soil degradation
-  ask patches with [soil-health > 1][ 
-    set soil-health (soil-health * (1 - soil-degrade-rate ecoregion))
-    set pcolor scale-color base-color soil-health -200 200
+  
+  let project-assurance-time-frame 900 ;; 75 years * 12 months 
+  ask patches with [soil-health > 1] [
+    if (ticks > (last-project-date + project-assurance-time-frame) and last-project-date != -1) [
+      set soil-health (soil-health * (1 - soil-degrade-rate jurisdiction))
+      set pcolor scale-color base-color soil-health -200 200
     ]
+  ]
 end
 
-to-report soil-degrade-rate [ecoregion-input]
+to-report soil-degrade-rate [jurisdiction-input]
 ;; patches use this reporter
 ;; this will eventually be "hard-coded"/taking input from dataset based on eco-agro zones 
-  (ifelse 
-    ecoregion-input = "A" [
-      report avg-soil-deg-rate - (avg-soil-deg-rate / 2)
-    ] 
-    ecoregion-input = "B" [
-      report avg-soil-deg-rate + (avg-soil-deg-rate / 2)
-    ] 
-    ecoregion-input = "C" [
-      report avg-soil-deg-rate
-    ]
-  )
+  let sdr avg-soil-deg-rate
+  ask ops-nodes with [node-jurisdiction = jurisdiction-input] [
+    set sdr soil-degradation-rate
+  ]
+  report sdr
+  
 end
 
 to core.look-for-new-project
@@ -44,9 +43,9 @@ to core.look-for-new-project
 end
 
 to-report core.best-deal-near-me
-;; project investors try to find the best potential project from a subset of project locations
-  let potential-projects patches in-radius 7 with [proj-here? = false 
-                                                   and soil-health < calc-optimal-health [ability] of myself]
+;; project investors try to find the best potential project from a subset of project locations 
+  let potential-projects patches in-radius 7 with [proj-here? = false and
+                                                   soil-health < calc-optimal-health ([ability] of myself) ]
   if potential-projects = nobody [
     report nobody
   ]
@@ -57,6 +56,7 @@ to-report core.best-deal-near-me
     
   ask potential-projects [
     let estimated-cost calc-estimated-cost self calc-optimal-health (PI-ability) PI-ability ;; in "local" currency (numeric output)
+    set estimated-cost estimated-cost * [project-price-multiplier] of min-one-of ops-nodes [distance myself] 
     let estimated-cost-in-home-currency convert-currency [jurisdiction] of self [home-jurisdiction] of myself estimated-cost
     
     let PI-total-cash-in-local-currency 0
@@ -71,9 +71,9 @@ to-report core.best-deal-near-me
       set estimated-cost-in-home-currency convert-currency [jurisdiction] of self [home-jurisdiction] of myself estimated-cost
     ]
 
-    let soil-health-given-investment calc-new-soil-health-given-investment PI-ability estimated-cost [soil-health] of self
+    let soil-health-given-investment calc-new-soil-health-given-investment PI-ability estimated-cost [soil-health] of self [jurisdiction] of myself
     
-    let estimated-aiv calc-estimated-aiv self soil-health-given-investment ;; in "local" currency (numeric output)
+    let estimated-aiv (calc-estimated-aiv self soil-health-given-investment) ;; in "local" currency (numeric output)
     let estimated-aiv-in-home-currency convert-currency [jurisdiction] of self [home-jurisdiction] of myself estimated-aiv
     
     let estimated-profit (estimated-aiv - estimated-cost)
@@ -94,10 +94,10 @@ to-report core.best-deal-near-me
     table:put potential-project-table "PI-estimated-aiv" item 1 best-potential-project-data ;; in PI's home currency
     table:put potential-project-table "project-cost" item 2 best-potential-project-data ;; in PI's home currency
     table:put potential-project-table "goal-soil-health" item 3 best-potential-project-data
-    table:put potential-project-table "expost-aiv-given-no-anomalies" calc-expost-aiv-no-anomalies (table:get potential-project-table "current-soil-health") (table:get potential-project-table "goal-soil-health") ;; still numerical value (in project's local currency)
+    table:put potential-project-table "expost-aiv-given-no-anomalies" calc-expost-aiv-no-anomalies (table:get potential-project-table "current-soil-health") (table:get potential-project-table "goal-soil-health") [jurisdiction] of table:get potential-project-table "project-location" ;; still numerical value (in project's local currency)
     table:put potential-project-table "currency" [jurisdiction] of table:get potential-project-table "project-location" ;; is a number, not string
     
-    set expected-roi (table:get potential-project-table "PI-estimated-aiv" - table:get potential-project-table "project-cost") / table:get potential-project-table "project-cost"
+    set expected-roi (table:get potential-project-table "PI-estimated-aiv" - table:get potential-project-table "project-cost") / max (list 0.00001 table:get potential-project-table "project-cost")
   ]
   
   let min-roi 1.1 ;; saying project investors want a 10% return on their investment based on their estimates
@@ -117,35 +117,45 @@ end
 
 to-report calc-estimated-aiv [proj-location new-soil-health]
   let old-soil-health [soil-health] of proj-location
-  let diff-in-rent (calc-rent new-soil-health - calc-rent old-soil-health)
+  let diff-in-rent (calc-rent (new-soil-health - (calc-rent old-soil-health [jurisdiction] of proj-location)) [jurisdiction] of proj-location)
   report precision random-normal diff-in-rent abs (diff-in-rent / 5) 2
 end
 
 to-report calc-estimated-cost [proj-location new-soil-health PI-ability]
   let old-soil-health [soil-health] of proj-location
-  report precision (calc-investment new-soil-health PI-ability - calc-investment old-soil-health PI-ability) 2
+  let jur [jurisdiction] of proj-location
+  report precision ((calc-investment new-soil-health PI-ability jur) - (calc-investment old-soil-health PI-ability jur)) 2
 end 
 
 ;; for estimated cost: to consider if firms go out of business, should be calculated at the end
 
-to-report calc-new-soil-health-given-investment [PI-ability proj-cost old-soil-health]
-  report sqrt((2 * PI-ability * c1 * proj-cost) + (old-soil-health ^ 2) + (2 * c2 * old-soil-health) + (c2 ^ 2)) - c2
+to-report calc-new-soil-health-given-investment [PI-ability proj-cost old-soil-health jur]
+  let jurc1 item 0 [c1] of ops-nodes with [node-jurisdiction = jur]
+  let jurc2 item 0 [c2] of ops-nodes with [node-jurisdiction = jur]
+  report sqrt((2 * PI-ability * jurc1 * proj-cost) + (old-soil-health ^ 2) + (2 * jurc2 * old-soil-health) + (jurc2 ^ 2)) - jurc2
 end
 
-to-report calc-rent [soil-health-input]
-  report c0 * ln(soil-health-input)
+to-report calc-rent [soil-health-input jur]
+  let jurc0 item 0 [c0] of ops-nodes with [node-jurisdiction = jur]
+  report jurc0 * ln(max (list 5 soil-health-input)) ;;
 end
 
-to-report calc-investment [soil-health-input PI-ability] ;; investment needed to get from 0 health to (soil-health-input) level
-  report ((soil-health-input ^ 2) / (2 * PI-ability * c1)) + ((c2 * soil-health-input) / (PI-ability * c1))
+to-report calc-investment [soil-health-input PI-ability jur] ;; investment needed to get from 0 health to (soil-health-input) level
+  let jurc1 item 0 [c1] of ops-nodes with [node-jurisdiction = jur]
+  let jurc2 item 0 [c2] of ops-nodes with [node-jurisdiction = jur]
+  report ((soil-health-input ^ 2) / (2 * PI-ability * jurc1)) + ((jurc2 * soil-health-input) / (PI-ability * jurc1))
 end
 
 to-report calc-optimal-health [PI-ability]
-  report (- c2 + sqrt (c2 ^ 2 + (4 * PI-ability * c0 * c1))) / 2
+  let jur [jurisdiction] of myself
+  let jurc0 item 0 [c0] of ops-nodes with [node-jurisdiction = jur]
+  let jurc1 item 0 [c1] of ops-nodes with [node-jurisdiction = jur]
+  let jurc2 item 0 [c2] of ops-nodes with [node-jurisdiction = jur]
+  report (- jurc2 + sqrt (jurc2 ^ 2 + (4 * PI-ability * jurc0 * jurc1))) / 2
 end
 
-to-report calc-expost-aiv-no-anomalies [old-soil-health new-soil-health]
-  let diff-in-rent (calc-rent new-soil-health - calc-rent old-soil-health)
+to-report calc-expost-aiv-no-anomalies [old-soil-health new-soil-health jur]
+  let diff-in-rent (calc-rent (new-soil-health - calc-rent old-soil-health jur) jur)
   report precision random-normal diff-in-rent (diff-in-rent / 5) 2 ;; variance may need to be smaller here because of less variation overall compared to estimation
 end 
 
@@ -164,7 +174,7 @@ to core.choose-ops-node
 ;; right now it's assumed the only possibilities are only that of their home country or a decentralized one
   let prob-choose-home-ops-node 80 ;; arbitrary for now
   
-  let proj-ops-node ifelse-value (random 100 < prob-choose-home-ops-node) [
+  let proj-ops-node ifelse-value (random 100 < prob-choose-home-ops-node or num-decentralized-currencies = 0) [
     one-of CENTRALIZED-OPS-NODES with [node-jurisdiction = [home-jurisdiction] of myself]
   ][
     one-of DECENTRALIZED-OPS-NODES
@@ -325,6 +335,7 @@ to core.update-patch-stats [project]
     set proj-counter (proj-counter + 1)
     set proj-here? false
     set pcolor scale-color base-color soil-health -200 200
+    set last-project-date ticks
   ]
 end
 
